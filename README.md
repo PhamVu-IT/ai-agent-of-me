@@ -89,6 +89,15 @@ Mô hình AI là file cố định, không tự thay đổi. Trợ lý "hiểu b
 
 Thử: "Gọi tôi là Vũ, xưng em nhé, còn em tên là Mây", rồi bấm 👎 một câu và nói "lần sau trả lời ngắn thôi".
 
+## Gọi trợ lý nhanh
+
+Mỗi lần mở, sau khi mở khoá, trợ lý **tự nghe ngay**, không cần bấm mic. Các cách mở nhanh:
+
+- **Nút nguồn 2 lần** (Samsung): Cài đặt → Tính năng nâng cao → Phím cạnh → Nhấn hai lần → Mở ứng dụng → Trợ lý AI.
+- **Thanh kéo xuống:** kéo thanh thông báo, bấm ✏️ (sửa nút), kéo nút **Trợ lý AI** vào.
+- **Widget:** giữ lâu màn hình chính → Tiện ích → Trợ lý AI → **Nói với trợ lý**.
+- **Trợ lý mặc định:** Cài đặt → Ứng dụng → Chọn ứng dụng mặc định → Ứng dụng trợ lý kỹ thuật số → Trợ lý AI. Sau đó vuốt chéo từ góc dưới màn hình (hoặc giữ nút Home nếu dùng thanh 3 nút) là gọi được.
+
 ## Khoản chi định kỳ
 
 - Lần đầu mở app, trợ lý hỏi bạn có những khoản cố định nào. Mỗi khoản lưu tên, ngày hạn, số tiền, từ khoá.

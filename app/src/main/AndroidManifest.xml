@@ -24,12 +24,39 @@
         android:theme="@android:style/Theme.Material.NoActionBar">
 
         <activity android:name=".MainActivity" android:exported="true"
+            android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Cho phép chọn làm "Ứng dụng trợ lý kỹ thuật số" mặc định -->
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
+
+        <service android:name=".quick.TalkTile"
+            android:exported="true"
+            android:label="Trợ lý AI"
+            android:icon="@android:drawable/ic_btn_speak_now"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <receiver android:name=".quick.TalkWidget" android:exported="false" android:label="Nói với trợ lý">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_talk_info" />
+        </receiver>
 
         <receiver android:name=".reminder.ReminderReceiver" android:exported="false" />
         <receiver android:name=".reminder.BootReceiver" android:exported="true">

@@ -46,10 +46,14 @@ class MainActivity : FragmentActivity() {
     private val speech = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         r.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let(vm::send)
     }
+    /** Mở app (nút nguồn 2 lần, nút nhanh, widget, cử chỉ trợ lý) là tự nghe luôn, sau khi mở khoá. */
+    private var listenWhenReady = false
+
     private val askPermissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        listenWhenReady = savedInstanceState == null
         val perms = mutableListOf(Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= 33) perms += Manifest.permission.POST_NOTIFICATIONS
         askPermissions.launch(perms.toTypedArray())
@@ -82,10 +86,21 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        listenWhenReady = true // app đang chạy ngầm mà được gọi lại
+    }
+
     override fun onStart() {
         super.onStart()
         if (backgroundSince > 0 && System.currentTimeMillis() - backgroundSince > 60_000) unlocked.value = false
-        if (!unlocked.value) unlock()
+        if (!unlocked.value) unlock() else listenIfAsked()
+    }
+
+    private fun listenIfAsked() {
+        if (!listenWhenReady || !unlocked.value || authenticating) return
+        listenWhenReady = false
+        listen()
     }
 
     override fun onStop() {
@@ -95,13 +110,14 @@ class MainActivity : FragmentActivity() {
 
     private fun unlock() {
         // Máy chưa cài khoá màn hình: không có gì để kiểm tra, cho vào và nhắc cài đặt
-        if (!auth.isAvailable()) { unlocked.value = true; return }
+        if (!auth.isAvailable()) { unlocked.value = true; listenIfAsked(); return }
         if (authenticating) return
         authenticating = true
         lifecycleScope.launch {
             unlocked.value = auth.confirm("Mở trợ lý AI")
             backgroundSince = 0L
             authenticating = false
+            listenIfAsked()
         }
     }
 
