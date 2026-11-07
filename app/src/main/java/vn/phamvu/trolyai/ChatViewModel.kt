@@ -9,11 +9,11 @@ import kotlinx.coroutines.launch
 import vn.phamvu.trolyai.agent.ActionExecutor
 import vn.phamvu.trolyai.agent.Assistant
 import vn.phamvu.trolyai.data.ChatMessage
-import vn.phamvu.trolyai.llm.MediaPipeEngine
+import vn.phamvu.trolyai.learn.Profile
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val db = (app as App).db
-    private val assistant = Assistant(MediaPipeEngine(app), db)
+    private val assistant = Assistant((app as App).llm, db)
     val executor = ActionExecutor(app, db)
 
     val messages = mutableStateListOf<ChatMessage>()
@@ -24,10 +24,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             messages.addAll(db.chats().recent(50).reversed())
             // Lần đầu: trợ lý chủ động hỏi để làm quen
             if (messages.isEmpty()) add(ChatMessage(fromUser = false, text =
-                "Chào bạn! Mình là trợ lý chạy ngay trên máy, không gửi dữ liệu ra ngoài. " +
-                "Để giúp bạn được nhiều nhất, cho mình hỏi: hằng tháng bạn có những khoản chi cố định nào " +
-                "(ví dụ tiền nhà, trả lãi, gửi gia đình, nộp tiết kiệm)? Mỗi khoản vào ngày nào, khoảng bao nhiêu tiền? " +
-                "Bạn kể từng khoản một cũng được."))
+                "Chào bạn! Mình là người bạn AI sống ngay trong điện thoại này, mọi chuyện bạn kể chỉ nằm trên máy. " +
+                "Làm quen chút nhé: mình nên gọi bạn là gì, xưng hô thế nào cho thoải mái " +
+                "(mình - bạn, em - anh, tớ - cậu…), và bạn muốn đặt tên cho mình là gì? " +
+                "Sau đó kể mình nghe các khoản chi cố định hằng tháng (tiền nhà, trả lãi, gửi gia đình, tiết kiệm…) " +
+                "để mình nhắc bạn đúng hạn."))
         }
     }
 
@@ -48,8 +49,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** 👍 / 👎 một câu trả lời. 👎 thì tin nhắn kế tiếp của bạn được hiểu là lời sửa. */
+    fun rate(m: ChatMessage, rating: Int) {
+        viewModelScope.launch {
+            db.chats().rate(m.id, rating)
+            val i = messages.indexOfFirst { it.id == m.id }
+            if (i >= 0) messages[i] = m.copy(rating = rating)
+            if (rating < 0) {
+                Profile(db).put(Profile.PENDING_CORRECTION, m.text)
+                add(ChatMessage(fromUser = false, text = "Ôi, mình sai ở đâu vậy? Nói mình nghe để lần sau mình nhớ nhé."))
+            }
+        }
+    }
+
     private suspend fun add(m: ChatMessage) {
-        db.chats().insert(m)
-        messages.add(m)
+        val id = db.chats().insert(m)
+        messages.add(m.copy(id = id))
     }
 }

@@ -39,6 +39,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.13.1")
+    // Chạy việc "học ban đêm" khi máy sạc và đang rảnh
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     // Vân tay / khuôn mặt / mã PIN
     implementation("androidx.biometric:biometric:1.1.0")

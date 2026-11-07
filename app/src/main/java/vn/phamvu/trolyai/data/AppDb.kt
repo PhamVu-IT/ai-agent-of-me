@@ -11,6 +11,8 @@ data class Memory(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val content: String,
     val createdAt: Long = System.currentTimeMillis(),
+    /** "fact" (điều về bạn), "rule" (lời bạn sửa, luôn tuân theo), "habit" (thói quen trợ lý tự nhận ra) */
+    val kind: String = "fact",
 )
 
 @Entity
@@ -27,7 +29,13 @@ data class ChatMessage(
     val fromUser: Boolean,
     val text: String,
     val createdAt: Long = System.currentTimeMillis(),
+    /** 1 = 👍, -1 = 👎, 0 = chưa chấm */
+    val rating: Int = 0,
 )
+
+/** Cài đặt và hồ sơ dạng khoá–giá trị: tên bạn, tên trợ lý, cách xưng hô, bản hồ sơ tóm tắt… */
+@Entity
+data class Setting(@PrimaryKey val key: String, val value: String)
 
 /** Khoản chi cố định hằng tháng, ví dụ tiền nhà ngày 5. */
 @Entity
@@ -78,6 +86,7 @@ data class VoiceProfile(
 interface MemoryDao {
     @Insert suspend fun insert(m: Memory): Long
     @Query("SELECT * FROM Memory ORDER BY createdAt DESC") suspend fun all(): List<Memory>
+    @Query("SELECT * FROM Memory WHERE kind = :kind ORDER BY createdAt") suspend fun ofKind(kind: String): List<Memory>
     @Query("DELETE FROM Memory WHERE id = :id") suspend fun delete(id: Long)
     @Query("DELETE FROM Memory WHERE content LIKE '%' || :keyword || '%'") suspend fun deleteMatching(keyword: String): Int
 }
@@ -94,6 +103,8 @@ interface ReminderDao {
 interface ChatDao {
     @Insert suspend fun insert(m: ChatMessage): Long
     @Query("SELECT * FROM ChatMessage ORDER BY createdAt DESC LIMIT :n") suspend fun recent(n: Int): List<ChatMessage>
+    @Query("SELECT * FROM ChatMessage WHERE createdAt >= :since ORDER BY createdAt") suspend fun since(since: Long): List<ChatMessage>
+    @Query("UPDATE ChatMessage SET rating = :rating WHERE id = :id") suspend fun rate(id: Long, rating: Int)
 }
 
 @Dao
@@ -113,6 +124,12 @@ interface FinanceDao {
 }
 
 @Dao
+interface SettingDao {
+    @Upsert suspend fun put(s: Setting)
+    @Query("SELECT value FROM Setting WHERE `key` = :key") suspend fun get(key: String): String?
+}
+
+@Dao
 interface VoiceDao {
     @Upsert suspend fun save(v: VoiceProfile)
     @Query("SELECT * FROM VoiceProfile WHERE id = 1") suspend fun get(): VoiceProfile?
@@ -120,7 +137,7 @@ interface VoiceDao {
 
 @Database(
     entities = [Memory::class, Reminder::class, ChatMessage::class, Obligation::class,
-        Payment::class, BankTxn::class, VoiceProfile::class],
+        Payment::class, BankTxn::class, VoiceProfile::class, Setting::class],
     version = 1,
 )
 abstract class AppDb : RoomDatabase() {
@@ -129,6 +146,7 @@ abstract class AppDb : RoomDatabase() {
     abstract fun chats(): ChatDao
     abstract fun finance(): FinanceDao
     abstract fun voice(): VoiceDao
+    abstract fun settings(): SettingDao
 
     companion object {
         @Volatile private var inst: AppDb? = null

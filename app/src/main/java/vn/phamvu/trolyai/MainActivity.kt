@@ -195,11 +195,16 @@ fun ChatScreen(
         }
         LazyColumn(Modifier.weight(1f), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(vm.messages) { m ->
-                Box(Modifier.fillMaxWidth(), contentAlignment = if (m.fromUser) Alignment.CenterEnd else Alignment.CenterStart) {
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = if (m.fromUser) Alignment.End else Alignment.Start) {
                     Card(colors = CardDefaults.cardColors(
                         containerColor = if (m.fromUser) MaterialTheme.colorScheme.primaryContainer
                         else MaterialTheme.colorScheme.surfaceVariant)) {
                         Text(m.text, Modifier.padding(10.dp))
+                    }
+                    // Chấm câu trả lời để trợ lý học: 👎 rồi nói chỗ sai, trợ lý ghi thành quy tắc
+                    if (!m.fromUser && m.id > 0) Row {
+                        TextButton(onClick = { vm.rate(m, 1) }) { Text(if (m.rating > 0) "👍✓" else "👍") }
+                        TextButton(onClick = { vm.rate(m, -1) }) { Text(if (m.rating < 0) "👎✓" else "👎") }
                     }
                 }
             }
