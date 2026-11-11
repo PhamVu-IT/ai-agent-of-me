@@ -9,11 +9,10 @@ import kotlinx.coroutines.launch
 import vn.phamvu.trolyai.agent.ActionExecutor
 import vn.phamvu.trolyai.agent.Assistant
 import vn.phamvu.trolyai.data.ChatMessage
-import vn.phamvu.trolyai.llm.MediaPipeEngine
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val db = (app as App).db
-    private val assistant = Assistant(MediaPipeEngine(app), db)
+    private val assistant = Assistant((app as App).llm, db)
     val executor = ActionExecutor(app, db)
 
     val messages = mutableStateListOf<ChatMessage>()
