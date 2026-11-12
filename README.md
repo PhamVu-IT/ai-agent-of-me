@@ -32,6 +32,7 @@
 | Khoản chi định kỳ | `finance/` | Sổ chi, nhắc 9h sáng, đọc biến động số dư |
 | Nhận diện giọng | `voice/VoiceId.kt` | sherpa-onnx, offline |
 | Tính cách, tự học | `learn/` | Hồ sơ, xưng hô, học ban đêm |
+| Hỗ trợ phỏng vấn | `interview/` | Chế độ ẩn: nghe tiếng Anh, gợi ý trả lời trong ô nổi nhỏ |
 | Nhắc nhở | `reminder/Reminders.kt` | Tự đặt lại sau khi khởi động lại máy |
 | Bảo mật | `security/` | Vân tay / PIN, nhận giọng, khoá mã hoá trong Keystore |
 | Giao diện | `MainActivity.kt` | Jetpack Compose |
@@ -105,6 +106,49 @@ Mỗi lần mở, sau khi mở khoá, trợ lý **tự nghe ngay**, không cần
 - Đánh dấu đã trả bằng 3 cách: nói với trợ lý, bấm nút trên thông báo, hoặc tự nhận từ thông báo ngân hàng.
 - Thông báo ngân hàng: app chỉ đọc thông báo đang hiện trên máy, **không đăng nhập ngân hàng**. Thông báo nào không phải giao dịch tiền ra thì bỏ qua ngay, không lưu. Giao dịch tiền ra được đoán theo từ khoá trong nội dung chuyển khoản (ví dụ "tien nha") hoặc số tiền lệch dưới 5%, rồi hỏi bạn "Có phải khoản Tiền nhà không?" với nút Đúng / Không phải.
 - Khi bạn hỏi về tiền, trợ lý chỉ trả lời dựa trên sổ này, không đoán.
+
+## Chế độ ẩn hỗ trợ phỏng vấn tiếng Anh
+
+Bấm **🎧 Phỏng vấn** trên màn hình chat.
+
+```
+ Micro (nghe liên tục, offline)
+   │  sherpa-onnx streaming zipformer (tiếng Anh)
+   ▼
+ Hết câu (im lặng 1 giây) ── giọng chủ máy? ── có → bỏ qua (bạn đang trả lời)
+   │ không
+   ▼
+ Gộp các đoạn của cùng một câu hỏi (đợi 1,2 giây)
+   │  InterviewCoach: câu hỏi + hồ sơ của bạn + vài lượt trước → mô hình AI trên máy
+   ▼
+ Ô nổi nhỏ màu tối:  VI: <câu hỏi dịch sang tiếng Việt>
+                     - 3 ý chính bằng tiếng Anh đơn giản
+                     Say: <câu mở đầu để nói ngay>
+```
+
+Cài đặt một lần:
+1. Tải mô hình nghe tiếng Anh: trang releases của k2-fsa/sherpa-onnx, mục **asr-models**, file
+   `sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2` (miễn phí). Giải nén rồi:
+   ```
+   adb push sherpa-onnx-streaming-zipformer-en-2023-06-26 /sdcard/Android/data/vn.phamvu.trolyai/files/asr-en
+   ```
+   Không cần đổi tên file; app tự chọn bản `int8` nếu có.
+2. Trong màn hình Phỏng vấn: điền **Hồ sơ của bạn** (vị trí ứng tuyển, kinh nghiệm, dự án, điểm mạnh). Gợi ý chỉ dựa trên hồ sơ này, mô hình được dặn không bịa kinh nghiệm.
+3. Bấm **Cấp quyền** để cho phép hiện trên ứng dụng khác, rồi **Kiểm tra lại**.
+4. Nên đăng ký **🎙️ Giọng của tôi** để máy không coi câu bạn nói là câu hỏi.
+
+Dùng:
+- **Bật chế độ ẩn**, rồi chuyển sang app khác hoặc tắt màn hình chat. Ô gợi ý rộng 260dp, chữ nhỏ, nền tối trong suốt nhẹ.
+- Chạm ô: thu thành một chấm nhỏ; chấm chuyển **xanh** khi có gợi ý mới. Kéo để đặt ở góc kín đáo. Giữ 1 giây để tắt.
+- Thông báo bắt buộc của Android khi dùng micro ở nền được đặt ở mức thấp nhất (không kêu, không rung), có nút **Dừng**.
+- Phần **Luyện tập** cho gõ câu hỏi để thử gợi ý mà không cần micro.
+
+Giới hạn cần biết:
+- Micro chỉ nghe âm thanh trong phòng. Hợp nhất: phỏng vấn trên máy tính bằng loa ngoài (hoặc gặp trực tiếp), điện thoại đặt gần. Nếu dùng tai nghe trên máy tính thì điện thoại không nghe được người hỏi.
+- Khi chính điện thoại đang có cuộc gọi (Zoom, Meet, Teams, gọi thường), Android dành micro cho cuộc gọi nên app không nghe được.
+- Gemma 3n E4B trên S23 Ultra mất khoảng vài giây cho mỗi gợi ý; câu trả lời được giữ rất ngắn để nhanh.
+- Mô hình và nhận giọng đều có thể nghe nhầm; dòng chữ xám phía trên cho biết máy đã nghe được gì.
+- Nhiều công ty không cho dùng công cụ trợ giúp trong lúc phỏng vấn; hãy xem quy định của họ.
 
 ## Bảo mật
 

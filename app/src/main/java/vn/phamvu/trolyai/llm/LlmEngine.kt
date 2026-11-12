@@ -15,11 +15,13 @@ interface LlmEngine {
 
 /**
  * Chạy mô hình hoàn toàn offline bằng MediaPipe LLM Inference.
+ * Dùng chung một bản cho cả app (App.llm) để không nạp mô hình hai lần vào RAM.
  * Chép file mô hình (.task) vào: /sdcard/Android/data/vn.phamvu.trolyai/files/model.task
  */
 class MediaPipeEngine(private val context: Context) : LlmEngine {
     private var llm: LlmInference? = null
-    private val lock = Mutex() // chat và việc học ban đêm dùng chung một mô hình, lần lượt từng việc
+    // Một mô hình chỉ chạy một câu một lúc; chat, học ban đêm và phỏng vấn dùng chung nên phải xếp hàng
+    private val lock = Mutex()
 
     val modelFile: File get() = File(context.getExternalFilesDir(null), "model.task")
 
