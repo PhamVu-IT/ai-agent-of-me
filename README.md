@@ -31,6 +31,7 @@
 | Trí nhớ, nhắc nhở, lịch sử, sổ chi | `data/AppDb.kt` | Room + SQLCipher (mã hoá AES-256) |
 | Khoản chi định kỳ | `finance/` | Sổ chi, nhắc 9h sáng, đọc biến động số dư |
 | Nhận diện giọng | `voice/VoiceId.kt` | sherpa-onnx, offline |
+| Tính cách, tự học | `learn/` | Hồ sơ, xưng hô, học ban đêm |
 | Hỗ trợ phỏng vấn | `interview/` | Chế độ ẩn: nghe tiếng Anh, gợi ý trả lời trong ô nổi nhỏ |
 | Nhắc nhở | `reminder/Reminders.kt` | Tự đặt lại sau khi khởi động lại máy |
 | Bảo mật | `security/` | Vân tay / PIN, nhận giọng, khoá mã hoá trong Keystore |
@@ -76,6 +77,27 @@ Thử nói:
 - "Tiền nhà 5 triệu, đóng ngày 5 hằng tháng"
 - "Tôi đóng tiền nhà rồi"
 - "Tháng này tôi nộp tiết kiệm chưa?"
+
+## Người bạn hiểu bạn hơn mỗi ngày
+
+Mô hình AI là file cố định, không tự thay đổi. Trợ lý "hiểu bạn hơn" nhờ trí nhớ ngày càng đầy đủ:
+
+- **Tính cách bạn bè:** lần đầu trợ lý hỏi tên bạn, cách xưng hô (mình - bạn, em - anh, tớ - cậu…) và tên bạn muốn đặt cho nó. Nó nói chuyện như bạn thân: hỏi han lại chuyện cũ, thật thà, không bịa.
+- **Học ban đêm** (`learn/LearnWorker.kt`): mỗi ngày một lần, khi máy **đang sạc và rảnh**, trợ lý đọc lại các cuộc trò chuyện mới và tự ghi thêm điều đáng nhớ về bạn và thói quen của bạn. Không tốn pin ban ngày.
+- **Hồ sơ về bạn:** mỗi 7 ngày, trợ lý tóm gọn mọi điều đã biết thành hồ sơ dưới 150 chữ, đi kèm mọi câu hỏi.
+- **👍 / 👎:** mỗi câu trả lời có hai nút. Bấm 👎 rồi nói chỗ sai, trợ lý ghi thành **quy tắc** và luôn tuân theo từ đó.
+- **Tìm trí nhớ:** so từ khoá không dấu ("tom" khớp "tôm"), ưu tiên điều mới, luôn kèm hồ sơ và quy tắc.
+
+Thử: "Gọi tôi là Vũ, xưng em nhé, còn em tên là Mây", rồi bấm 👎 một câu và nói "lần sau trả lời ngắn thôi".
+
+## Gọi trợ lý nhanh
+
+Mỗi lần mở, sau khi mở khoá, trợ lý **tự nghe ngay**, không cần bấm mic. Các cách mở nhanh:
+
+- **Nút nguồn 2 lần** (Samsung): Cài đặt → Tính năng nâng cao → Phím cạnh → Nhấn hai lần → Mở ứng dụng → Trợ lý AI.
+- **Thanh kéo xuống:** kéo thanh thông báo, bấm ✏️ (sửa nút), kéo nút **Trợ lý AI** vào.
+- **Widget:** giữ lâu màn hình chính → Tiện ích → Trợ lý AI → **Nói với trợ lý**.
+- **Trợ lý mặc định:** Cài đặt → Ứng dụng → Chọn ứng dụng mặc định → Ứng dụng trợ lý kỹ thuật số → Trợ lý AI. Sau đó vuốt chéo từ góc dưới màn hình (hoặc giữ nút Home nếu dùng thanh 3 nút) là gọi được.
 
 ## Khoản chi định kỳ
 
@@ -141,10 +163,11 @@ Giới hạn cần biết:
 
 ## Hướng phát triển tiếp
 
-- **Tìm trí nhớ theo ý nghĩa**: thay tìm từ khoá bằng embedding (MediaPipe Text Embedder) để "tôi ăn gì được" vẫn tìm ra "dị ứng tôm".
 - **Chế độ online tuỳ chọn**: thêm một `LlmEngine` gọi API mạnh hơn khi có mạng, rơi về mô hình offline khi mất mạng.
 - **Thêm hành động**: lịch (CalendarContract), ghi chú, bật đèn pin, mở app theo tên.
 - **Nhắc lặp lại** (hằng ngày, hằng tuần) và màn hình quản lý trí nhớ / nhắc nhở.
 - **Xuất / nhập dữ liệu có mật khẩu** để chuyển sang máy mới mà không cần Google Drive.
+- **Tìm trí nhớ theo ý nghĩa** bằng mô hình EmbeddingGemma (miễn phí, hiểu tiếng Việt), để "tôi ăn được gì?" tìm ra "dị ứng tôm".
+- **Màn hình trí nhớ** để xem, sửa, xoá những gì trợ lý đã tự học.
 - **Màn hình sổ chi** để xem, sửa, xoá các khoản và lịch sử đã trả.
 - **Từ khoá đánh thức** ("Này trợ lý") bằng một mô hình nhỏ chạy nền.

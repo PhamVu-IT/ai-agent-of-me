@@ -20,7 +20,7 @@ interface LlmEngine {
  */
 class MediaPipeEngine(private val context: Context) : LlmEngine {
     private var llm: LlmInference? = null
-    // Một mô hình chỉ chạy một câu một lúc; chat và chế độ phỏng vấn dùng chung nên phải xếp hàng
+    // Một mô hình chỉ chạy một câu một lúc; chat, học ban đêm và phỏng vấn dùng chung nên phải xếp hàng
     private val lock = Mutex()
 
     val modelFile: File get() = File(context.getExternalFilesDir(null), "model.task")
@@ -30,7 +30,7 @@ class MediaPipeEngine(private val context: Context) : LlmEngine {
         require(modelFile.exists()) { "Chưa có mô hình. Hãy chép file .task vào ${modelFile.absolutePath}" }
         val opts = LlmInference.LlmInferenceOptions.builder()
             .setModelPath(modelFile.absolutePath)
-            .setMaxTokens(1536)
+            .setMaxTokens(4096) // tổng chữ vào + ra; đủ chỗ cho hồ sơ, quy tắc và trí nhớ
             // Chạy trên GPU (Adreno của Snapdragon): nhanh hơn và mát máy hơn CPU
             .setPreferredBackend(LlmInference.Backend.GPU)
             .build()

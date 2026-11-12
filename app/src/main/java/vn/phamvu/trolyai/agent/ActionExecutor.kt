@@ -8,6 +8,7 @@ import vn.phamvu.trolyai.data.AppDb
 import vn.phamvu.trolyai.data.Memory
 import vn.phamvu.trolyai.data.Reminder
 import vn.phamvu.trolyai.finance.Finance
+import vn.phamvu.trolyai.learn.Profile
 import vn.phamvu.trolyai.reminder.ReminderScheduler
 import vn.phamvu.trolyai.security.Authenticator
 import java.text.SimpleDateFormat
@@ -37,6 +38,17 @@ class ActionExecutor(private val ctx: Context, private val db: AppDb) {
         "remember" -> {
             db.memories().insert(Memory(content = a.args.getString("content")))
             "Đã ghi nhớ."
+        }
+        "learn_rule" -> {
+            db.memories().insert(Memory(content = a.args.getString("rule"), kind = "rule"))
+            "📝 Đã ghi nhớ bài học."
+        }
+        "set_profile" -> {
+            val p = Profile(db)
+            a.args.optString("user_name").takeIf { it.isNotBlank() }?.let { p.put(Profile.USER_NAME, it) }
+            a.args.optString("assistant_name").takeIf { it.isNotBlank() }?.let { p.put(Profile.ASSISTANT_NAME, it) }
+            a.args.optString("xung_ho").takeIf { it.contains("-") }?.let { p.put(Profile.XUNG_HO, it) }
+            ""
         }
         "forget" -> {
             val n = db.memories().deleteMatching(a.args.getString("keyword"))

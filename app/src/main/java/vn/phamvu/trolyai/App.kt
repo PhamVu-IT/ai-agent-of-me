@@ -5,11 +5,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import vn.phamvu.trolyai.data.AppDb
 import vn.phamvu.trolyai.finance.FinanceAlarms
+import vn.phamvu.trolyai.learn.LearnWorker
 import vn.phamvu.trolyai.llm.MediaPipeEngine
 
 class App : Application() {
     val db by lazy { AppDb.get(this) }
-    /** Mô hình AI dùng chung cho chat và chế độ phỏng vấn. */
+    /** Mô hình AI dùng chung cho chat, học ban đêm và chế độ phỏng vấn; tránh nạp hai lần tốn RAM. */
     val llm by lazy { MediaPipeEngine(this) }
 
     override fun onCreate() {
@@ -25,6 +26,7 @@ class App : Application() {
             }
         )
         FinanceAlarms.scheduleDaily(this)
+        LearnWorker.schedule(this)
     }
 
     companion object {
