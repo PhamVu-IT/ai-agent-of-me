@@ -2,6 +2,8 @@ package vn.phamvu.trolyai.data
 
 import android.content.Context
 import androidx.room.*
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import vn.phamvu.trolyai.security.DbKey
 
@@ -74,6 +76,14 @@ data class VoiceProfile(
     val createdAt: Long = System.currentTimeMillis(),
 )
 
+/** Hồ sơ dùng cho chế độ phỏng vấn: vị trí ứng tuyển, kinh nghiệm, điểm mạnh. Chỉ có một dòng (id = 1). */
+@Entity
+data class InterviewProfile(
+    @PrimaryKey val id: Int = 1,
+    val text: String,
+    val updatedAt: Long = System.currentTimeMillis(),
+)
+
 @Dao
 interface MemoryDao {
     @Insert suspend fun insert(m: Memory): Long
@@ -118,10 +128,16 @@ interface VoiceDao {
     @Query("SELECT * FROM VoiceProfile WHERE id = 1") suspend fun get(): VoiceProfile?
 }
 
+@Dao
+interface InterviewDao {
+    @Upsert suspend fun save(p: InterviewProfile)
+    @Query("SELECT * FROM InterviewProfile WHERE id = 1") suspend fun get(): InterviewProfile?
+}
+
 @Database(
     entities = [Memory::class, Reminder::class, ChatMessage::class, Obligation::class,
-        Payment::class, BankTxn::class, VoiceProfile::class],
-    version = 1,
+        Payment::class, BankTxn::class, VoiceProfile::class, InterviewProfile::class],
+    version = 2,
 )
 abstract class AppDb : RoomDatabase() {
     abstract fun memories(): MemoryDao
@@ -129,8 +145,17 @@ abstract class AppDb : RoomDatabase() {
     abstract fun chats(): ChatDao
     abstract fun finance(): FinanceDao
     abstract fun voice(): VoiceDao
+    abstract fun interview(): InterviewDao
 
     companion object {
+        /** Bản 2 thêm bảng hồ sơ phỏng vấn; giữ nguyên dữ liệu cũ. */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `InterviewProfile` (`id` INTEGER NOT NULL, " +
+                    "`text` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+            }
+        }
+
         @Volatile private var inst: AppDb? = null
         fun get(ctx: Context): AppDb = inst ?: synchronized(this) {
             inst ?: run {
@@ -138,6 +163,7 @@ abstract class AppDb : RoomDatabase() {
                 // Toàn bộ file dữ liệu được mã hoá AES-256 bằng SQLCipher
                 Room.databaseBuilder(ctx.applicationContext, AppDb::class.java, "trolyai-secure.db")
                     .openHelperFactory(SupportOpenHelperFactory(DbKey.passphrase(ctx)))
+                    .addMigrations(MIGRATION_1_2)
                     .build()
             }.also { inst = it }
         }

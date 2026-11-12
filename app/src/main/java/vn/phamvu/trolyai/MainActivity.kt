@@ -2,6 +2,8 @@ package vn.phamvu.trolyai
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -11,6 +13,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -18,11 +23,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
+import vn.phamvu.trolyai.data.InterviewProfile
+import vn.phamvu.trolyai.interview.EnglishAsr
+import vn.phamvu.trolyai.interview.InterviewCoach
+import vn.phamvu.trolyai.interview.InterviewService
 import vn.phamvu.trolyai.security.BiometricAuthenticator
 import vn.phamvu.trolyai.security.VoiceThenBiometric
 import vn.phamvu.trolyai.voice.VoiceId
@@ -39,7 +49,7 @@ class MainActivity : FragmentActivity() {
     private var backgroundSince = 0L
     private var authenticating = false // màn hình nhập PIN làm app tạm ẩn, tránh hỏi lại hai lần
 
-    private val screen = mutableStateOf("chat")          // "chat" hoặc "giong"
+    private val screen = mutableStateOf("chat")          // "chat", "giong" hoặc "phongvan"
     private val voicePrompt = mutableStateOf<String?>(null) // dòng chữ khi đang nghe để nhận giọng
 
     // Nhận giọng nói (Android hỗ trợ offline nếu đã tải gói tiếng Việt trong Google app)
@@ -65,12 +75,14 @@ class MainActivity : FragmentActivity() {
                     when {
                         !unlocked.value -> LockedScreen(noLockSet = !auth.isAvailable(), onUnlock = ::unlock)
                         screen.value == "giong" -> VoiceEnrollScreen(voice, onDone = { screen.value = "chat" })
+                        screen.value == "phongvan" -> InterviewScreen(onBack = { screen.value = "chat" })
                         else -> ChatScreen(vm,
                             onMic = ::listen,
                             onSpeak = { tts?.speak(it, TextToSpeech.QUEUE_FLUSH, null, "r") },
                             // Phải xác nhận vân tay trước, để người khác không đăng ký giọng của họ thay bạn
                             onVoiceSetup = { lifecycleScope.launch { if (auth.confirm("Đăng ký giọng chủ máy")) screen.value = "giong" } },
-                            onBankSetup = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
+                            onBankSetup = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+                            onInterview = { screen.value = "phongvan" })
                     }
                     voicePrompt.value?.let { msg ->
                         Dialog(onDismissRequest = {}) {
@@ -181,6 +193,7 @@ fun ChatScreen(
     onSpeak: (String) -> Unit,
     onVoiceSetup: () -> Unit,
     onBankSetup: () -> Unit,
+    onInterview: () -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
     val list = rememberLazyListState()
@@ -189,9 +202,10 @@ fun ChatScreen(
         vm.messages.lastOrNull()?.takeIf { !it.fromUser }?.let { onSpeak(it.text) }
     }
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(12.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AssistChip(onClick = onVoiceSetup, label = { Text("🎙️ Giọng của tôi") })
             AssistChip(onClick = onBankSetup, label = { Text("🏦 Đọc biến động số dư") })
+            AssistChip(onClick = onInterview, label = { Text("🎧 Phỏng vấn") })
         }
         LazyColumn(Modifier.weight(1f), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(vm.messages) { m ->
@@ -210,5 +224,86 @@ fun ChatScreen(
             TextButton(onClick = onMic) { Text("🎤") }
             Button(onClick = { vm.send(input); input = "" }) { Text("Gửi") }
         }
+    }
+}
+
+/**
+ * Cài đặt chế độ ẩn hỗ trợ phỏng vấn tiếng Anh: hồ sơ của bạn, kiểm tra mô hình và quyền, bật / tắt,
+ * và ô luyện tập gõ câu hỏi để thử gợi ý.
+ */
+@Composable
+fun InterviewScreen(onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    val app = ctx.applicationContext as App
+    val scope = rememberCoroutineScope()
+    var profile by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
+    var practice by remember { mutableStateOf("") }
+    var practiceOut by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    // Đọc lại mỗi lần bấm "Kiểm tra lại", vì người dùng có thể vừa sang Cài đặt cấp quyền
+    var check by remember { mutableIntStateOf(0) }
+    val llmReady = remember(check) { app.llm.modelFile.exists() }
+    val asrReady = remember(check) { EnglishAsr(ctx).modelReady() }
+    val overlayOk = remember(check) { Settings.canDrawOverlays(ctx) }
+    val micOk = remember(check) { ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED }
+    val running = InterviewService.running.value
+
+    LaunchedEffect(Unit) { profile = app.db.interview().get()?.text ?: "" }
+    suspend fun saveProfile() = app.db.interview().save(InterviewProfile(text = profile.trim()))
+
+    Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(16.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("🎧 Hỗ trợ phỏng vấn tiếng Anh", style = MaterialTheme.typography.titleLarge)
+        Text("Máy nghe câu hỏi của người phỏng vấn, hiện gợi ý trả lời trong một ô nhỏ màu tối nổi trên màn hình. " +
+            "Chạy hoàn toàn offline. Chạm ô để thu thành chấm nhỏ (chấm xanh = có gợi ý mới), kéo để di chuyển, " +
+            "giữ 1 giây để tắt.")
+
+        OutlinedTextField(profile, { profile = it }, Modifier.fillMaxWidth(), minLines = 5,
+            label = { Text("Hồ sơ của bạn") },
+            placeholder = { Text("Vị trí ứng tuyển, công ty, số năm kinh nghiệm, dự án nổi bật, kỹ năng, điểm mạnh, " +
+                "lý do muốn vào công ty… Viết tiếng Anh càng tốt. Gợi ý chỉ dựa trên những gì bạn ghi ở đây.") })
+        Button(onClick = { scope.launch { saveProfile(); note = "Đã lưu hồ sơ (mã hoá trong máy)." } }) { Text("Lưu hồ sơ") }
+
+        Text("Kiểm tra", style = MaterialTheme.typography.titleMedium)
+        Text((if (llmReady) "✅" else "❌") + " Mô hình AI (model.task)")
+        Text((if (asrReady) "✅" else "❌") + " Mô hình nghe tiếng Anh (thư mục asr-en, xem README)")
+        Text((if (micOk) "✅" else "❌") + " Quyền dùng micro")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text((if (overlayOk) "✅" else "❌") + " Quyền hiện trên ứng dụng khác", Modifier.weight(1f))
+            if (!overlayOk) TextButton(onClick = {
+                ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
+            }) { Text("Cấp quyền") }
+        }
+        OutlinedButton(onClick = { check++ }) { Text("Kiểm tra lại") }
+
+        if (running) {
+            Button(onClick = { InterviewService.stop(ctx) }, Modifier.fillMaxWidth()) { Text("Tắt chế độ ẩn") }
+        } else {
+            Button(enabled = llmReady && asrReady && overlayOk && micOk, modifier = Modifier.fillMaxWidth(), onClick = {
+                scope.launch { saveProfile(); InterviewService.start(ctx) }
+            }) { Text("Bật chế độ ẩn") }
+        }
+        Text("Mẹo: phỏng vấn trên máy tính bằng loa ngoài, đặt điện thoại gần loa. Đăng ký \"Giọng của tôi\" để máy " +
+            "bỏ qua câu bạn nói. Khi điện thoại đang có cuộc gọi, Android không cho app khác nghe micro.",
+            style = MaterialTheme.typography.bodySmall)
+
+        HorizontalDivider()
+        Text("Luyện tập", style = MaterialTheme.typography.titleMedium)
+        OutlinedTextField(practice, { practice = it }, Modifier.fillMaxWidth(),
+            placeholder = { Text("Gõ một câu hỏi, ví dụ: Tell me about yourself") })
+        Button(enabled = !busy && llmReady && practice.isNotBlank(), onClick = {
+            busy = true; practiceOut = "Đang nghĩ…"
+            scope.launch {
+                saveProfile()
+                practiceOut = try { InterviewCoach(app.llm, app.db).suggest(practice.trim()) }
+                catch (e: Exception) { "Lỗi: ${e.message}" }
+                busy = false
+            }
+        }) { Text("Gợi ý trả lời") }
+        if (practiceOut.isNotEmpty()) Card { Text(practiceOut, Modifier.padding(12.dp)) }
+
+        if (note.isNotEmpty()) Text(note)
+        Button(onClick = onBack) { Text("Quay lại") }
     }
 }
