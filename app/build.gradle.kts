@@ -51,4 +51,5 @@ dependencies {
     // Nhận diện giọng chủ máy: tải sherpa-onnx-*.aar từ GitHub releases của k2-fsa/sherpa-onnx,
     // đổi tên thành sherpa-onnx.aar và đặt vào app/libs/
     implementation(files("libs/sherpa-onnx.aar"))
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
 }
