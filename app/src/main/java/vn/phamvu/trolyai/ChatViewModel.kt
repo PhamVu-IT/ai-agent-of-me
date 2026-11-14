@@ -1,10 +1,13 @@
 package vn.phamvu.trolyai
 
 import android.app.Application
+import android.net.Uri
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import vn.phamvu.trolyai.agent.ActionExecutor
 import vn.phamvu.trolyai.agent.Assistant
@@ -13,11 +16,51 @@ import vn.phamvu.trolyai.learn.Profile
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val db = (app as App).db
-    private val assistant = Assistant((app as App).llm, db)
+    private val llm = (app as App).llm
+    private val assistant = Assistant(llm, db)
     val executor = ActionExecutor(app, db)
 
     val messages = mutableStateListOf<ChatMessage>()
     val thinking = mutableStateOf(false)
+
+    /** Đã có file mô hình AI trong máy chưa; chưa có thì màn hình chat hiện nút chọn file. */
+    val modelReady = mutableStateOf(llm.hasModel())
+    /** Tiến độ chép mô hình 0..1, null khi không chép. */
+    val importProgress = mutableStateOf<Float?>(null)
+    /** Đang nạp mô hình vào RAM sau khi chép xong. */
+    val importLoading = mutableStateOf(false)
+    val importNote = mutableStateOf("")
+    private var importJob: Job? = null
+
+    fun refreshModel() { modelReady.value = llm.hasModel() }
+
+    /** Chép file .task người dùng vừa chọn vào app rồi nạp luôn. Chạy tiếp khi xoay màn hình. */
+    fun importModel(uri: Uri) {
+        if (importJob?.isActive == true) return
+        importNote.value = ""
+        importProgress.value = 0f
+        importJob = viewModelScope.launch {
+            importNote.value = try {
+                llm.importModel(uri) { p ->
+                    importProgress.value = p
+                    if (p >= 1f) importLoading.value = true
+                }
+                "✅ Đã cài mô hình mới. Giờ bạn nhắn cho mình được rồi."
+            } catch (e: CancellationException) {
+                "Đã huỷ chép mô hình."
+            } catch (e: Throwable) {
+                if (llm.hasModel() && importLoading.value)
+                    "Đã chép file nhưng không nạp được mô hình: ${e.message}. Có thể file không đúng định dạng MediaPipe hoặc máy thiếu RAM; hãy chọn file khác."
+                else "Lỗi khi chép mô hình: ${e.message}"
+            } finally {
+                importProgress.value = null
+                importLoading.value = false
+                refreshModel()
+            }
+        }
+    }
+
+    fun cancelImport() { importJob?.cancel() }
 
     init {
         viewModelScope.launch {

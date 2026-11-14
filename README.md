@@ -55,10 +55,17 @@ Tải từ Hugging Face, trang `litert-community` (cần đăng nhập và chấ
    Trước khi build: vào https://github.com/k2-fsa/sherpa-onnx/releases, tải file `sherpa-onnx-<phiên bản>.aar`,
    đổi tên thành `sherpa-onnx.aar` và đặt vào thư mục `app/libs/`. Thiếu file này app sẽ không build được.
 2. Bật Developer options + USB debugging trên điện thoại, cắm cáp, bấm **Run**.
-3. Chép mô hình vào máy:
-   ```
-   adb push gemma-3n-E4B-it-int4.task /sdcard/Android/data/vn.phamvu.trolyai/files/model.task
-   ```
+3. Đưa mô hình vào app, chọn một trong hai cách:
+   - **Chọn ngay trong app (dễ nhất):** tải file `.task` về điện thoại (thường nằm trong thư mục Download),
+     mở app, bấm **Chọn file mô hình** trên thẻ "Chưa có mô hình AI" (hoặc chip **🧠 Mô hình AI** để đổi
+     mô hình khác) rồi chọn file. App chép file vào bộ nhớ riêng, hiện phần trăm tiến độ (file vài GB mất
+     vài phút, cứ để app mở), sau đó tự nạp mô hình. Chép xong có thể xoá bản trong Download cho đỡ tốn chỗ.
+     Cần trống khoảng bằng dung lượng file cộng thêm 200 MB.
+   - **Dùng cáp và adb:**
+     ```
+     adb push gemma-3n-E4B-it-int4.task /sdcard/Android/data/vn.phamvu.trolyai/files/model.task
+     ```
+   Chỉ dùng được file `.task` (hoặc `.bin` kiểu cũ) cho MediaPipe; file `.litertlm` chưa dùng được.
 4. Mô hình nhận giọng chủ máy: cũng ở trang releases trên, mục **speaker-recongition-models**, tải
    `3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx` rồi:
    ```
