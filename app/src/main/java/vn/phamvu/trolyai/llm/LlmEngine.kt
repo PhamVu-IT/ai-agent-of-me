@@ -1,12 +1,17 @@
 package vn.phamvu.trolyai.llm
 
 import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
+import kotlin.coroutines.coroutineContext
 
 /** Giao diện chung để sau này đổi sang llama.cpp hoặc gọi API online mà không sửa phần còn lại. */
 interface LlmEngine {
@@ -16,7 +21,8 @@ interface LlmEngine {
 /**
  * Chạy mô hình hoàn toàn offline bằng MediaPipe LLM Inference.
  * Dùng chung một bản cho cả app (App.llm) để không nạp mô hình hai lần vào RAM.
- * Chép file mô hình (.task) vào: /sdcard/Android/data/vn.phamvu.trolyai/files/model.task
+ * File mô hình nằm ở: /sdcard/Android/data/vn.phamvu.trolyai/files/model.task
+ * Có hai cách đưa vào: chọn file ngay trong app (importModel) hoặc adb push vào đúng chỗ trên.
  */
 class MediaPipeEngine(private val context: Context) : LlmEngine {
     private var llm: LlmInference? = null
@@ -25,9 +31,11 @@ class MediaPipeEngine(private val context: Context) : LlmEngine {
 
     val modelFile: File get() = File(context.getExternalFilesDir(null), "model.task")
 
+    fun hasModel(): Boolean = modelFile.exists() && modelFile.length() > 0
+
     private fun ensureLoaded(): LlmInference {
         llm?.let { return it }
-        require(modelFile.exists()) { "Chưa có mô hình. Hãy chép file .task vào ${modelFile.absolutePath}" }
+        require(hasModel()) { "Chưa có mô hình. Bấm \"🧠 Mô hình AI\" để chọn file .task trong máy, hoặc chép vào ${modelFile.absolutePath}" }
         val opts = LlmInference.LlmInferenceOptions.builder()
             .setModelPath(modelFile.absolutePath)
             .setMaxTokens(4096) // tổng chữ vào + ra; đủ chỗ cho hồ sơ, quy tắc và trí nhớ
@@ -39,5 +47,71 @@ class MediaPipeEngine(private val context: Context) : LlmEngine {
 
     override suspend fun generate(prompt: String): String = lock.withLock {
         withContext(Dispatchers.Default) { ensureLoaded().generateResponse(prompt) }
+    }
+
+    /**
+     * Chép file mô hình người dùng chọn (qua trình chọn file của Android) vào chỗ của app rồi nạp thử.
+     * File vài GB nên chép từng khúc và báo tiến độ 0..1 qua [onProgress]. Chép ra file tạm trước,
+     * xong mới thay file cũ, nên nếu hỏng giữa chừng thì mô hình cũ vẫn dùng được.
+     */
+    suspend fun importModel(uri: Uri, onProgress: (Float) -> Unit) = withContext(Dispatchers.IO) {
+        val cr = context.contentResolver
+        var name = ""
+        var size = -1L
+        cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+            if (c.moveToFirst()) {
+                name = c.getString(0) ?: ""
+                if (!c.isNull(1)) size = c.getLong(1)
+            }
+        }
+        val lower = name.lowercase()
+        require(name.isEmpty() || lower.endsWith(".task") || lower.endsWith(".bin")) {
+            if (lower.endsWith(".litertlm")) "File .litertlm chưa dùng được với bản MediaPipe trong app. Hãy tải bản .task của mô hình."
+            else "\"$name\" không phải file mô hình. Hãy chọn file đuôi .task (ví dụ gemma-3n-E4B-it-int4.task)."
+        }
+        val dir = modelFile.parentFile ?: throw IOException("Không tìm thấy bộ nhớ của app")
+        dir.mkdirs()
+        val tmp = File(dir, "model.task.tmp")
+        tmp.delete()
+        // Cần chỗ cho file mới; file cũ chỉ bị xoá sau khi chép xong
+        if (size > 0 && dir.usableSpace < size + 200L * 1024 * 1024) {
+            throw IOException("Không đủ bộ nhớ trống: cần khoảng ${size / 1_000_000} MB, máy còn ${dir.usableSpace / 1_000_000} MB.")
+        }
+        try {
+            val input = cr.openInputStream(uri) ?: throw IOException("Không mở được file đã chọn")
+            input.use { ins ->
+                tmp.outputStream().use { out ->
+                    val buf = ByteArray(1 shl 20)
+                    var done = 0L
+                    var lastReport = -1
+                    while (true) {
+                        coroutineContext.ensureActive()
+                        val n = ins.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        done += n
+                        if (size > 0) {
+                            val pct = (done * 1000 / size).toInt()
+                            if (pct != lastReport) { lastReport = pct; onProgress(done.toFloat() / size) }
+                        }
+                    }
+                    out.fd.sync()
+                }
+            }
+            if (tmp.length() == 0L) throw IOException("File đã chọn rỗng")
+            if (size > 0 && tmp.length() != size) throw IOException("Chép thiếu dữ liệu (${tmp.length()}/$size byte). Thử lại nhé.")
+        } catch (e: Throwable) {
+            tmp.delete()
+            throw e
+        }
+        onProgress(1f)
+        // Đợi câu đang trả lời (nếu có) xong rồi mới thay mô hình
+        lock.withLock {
+            llm?.close()
+            llm = null
+            modelFile.delete()
+            if (!tmp.renameTo(modelFile)) { tmp.delete(); throw IOException("Không thay được file mô hình") }
+            withContext(Dispatchers.Default) { ensureLoaded() }
+        }
     }
 }

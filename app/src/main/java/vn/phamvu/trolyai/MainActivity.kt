@@ -24,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.fragment.app.FragmentActivity
@@ -61,6 +62,12 @@ class MainActivity : FragmentActivity() {
 
     private val askPermissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
 
+    // Chọn file mô hình (.task) từ bộ nhớ máy, thẻ nhớ hoặc Google Drive. File .task không có kiểu MIME
+    // riêng nên phải cho chọn mọi loại file, rồi kiểm tra đuôi sau.
+    private val pickModel = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(vm::importModel)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         listenWhenReady = savedInstanceState == null
@@ -86,7 +93,8 @@ class MainActivity : FragmentActivity() {
                             // Phải xác nhận vân tay trước, để người khác không đăng ký giọng của họ thay bạn
                             onVoiceSetup = { lifecycleScope.launch { if (auth.confirm("Đăng ký giọng chủ máy")) screen.value = "giong" } },
                             onBankSetup = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
-                            onInterview = { screen.value = "phongvan" })
+                            onInterview = { screen.value = "phongvan" },
+                            onPickModel = { pickModel.launch(arrayOf("*/*")) })
                     }
                     voicePrompt.value?.let { msg ->
                         Dialog(onDismissRequest = {}) {
@@ -106,6 +114,7 @@ class MainActivity : FragmentActivity() {
     override fun onStart() {
         super.onStart()
         if (backgroundSince > 0 && System.currentTimeMillis() - backgroundSince > 60_000) unlocked.value = false
+        vm.refreshModel() // có thể vừa adb push mô hình vào máy
         if (!unlocked.value) unlock() else listenIfAsked()
     }
 
@@ -210,8 +219,16 @@ fun ChatScreen(
     onVoiceSetup: () -> Unit,
     onBankSetup: () -> Unit,
     onInterview: () -> Unit,
+    onPickModel: () -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
+    val progress = vm.importProgress.value
+    // Chép file vài GB mất vài phút: giữ màn hình sáng để máy không ngủ giữa chừng
+    val view = LocalView.current
+    DisposableEffect(progress != null) {
+        view.keepScreenOn = progress != null
+        onDispose { view.keepScreenOn = false }
+    }
     val list = rememberLazyListState()
     LaunchedEffect(vm.messages.size) {
         if (vm.messages.isNotEmpty()) list.animateScrollToItem(vm.messages.size - 1)
@@ -222,6 +239,18 @@ fun ChatScreen(
             AssistChip(onClick = onVoiceSetup, label = { Text("🎙️ Giọng của tôi") })
             AssistChip(onClick = onBankSetup, label = { Text("🏦 Đọc biến động số dư") })
             AssistChip(onClick = onInterview, label = { Text("🎧 Phỏng vấn") })
+            AssistChip(onClick = { if (progress == null) onPickModel() }, label = { Text("🧠 Mô hình AI") })
+        }
+        if (!vm.modelReady.value || progress != null || vm.importNote.value.isNotEmpty()) {
+            ModelCard(
+                ready = vm.modelReady.value,
+                progress = progress,
+                loading = vm.importLoading.value,
+                note = vm.importNote.value,
+                onPick = onPickModel,
+                onCancel = vm::cancelImport,
+                onDismiss = { vm.importNote.value = "" },
+            )
         }
         LazyColumn(Modifier.weight(1f), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(vm.messages) { m ->
@@ -244,6 +273,47 @@ fun ChatScreen(
             OutlinedTextField(input, { input = it }, Modifier.weight(1f), placeholder = { Text("Nhắn cho trợ lý…") })
             TextButton(onClick = onMic) { Text("🎤") }
             Button(onClick = { vm.send(input); input = "" }) { Text("Gửi") }
+        }
+    }
+}
+
+/** Thẻ chọn / đổi file mô hình AI, hiện tiến độ khi đang chép. */
+@Composable
+fun ModelCard(
+    ready: Boolean,
+    progress: Float?,
+    loading: Boolean,
+    note: String,
+    onPick: () -> Unit,
+    onCancel: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            when {
+                loading -> {
+                    Text("Đang nạp mô hình vào bộ nhớ, chờ chút nhé…")
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+                progress != null -> {
+                    Text("Đang chép mô hình vào app: ${(progress * 100).toInt()}%")
+                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                    Text("File lớn nên mất vài phút. Để app mở, đừng tắt màn hình.", style = MaterialTheme.typography.bodySmall)
+                    OutlinedButton(onClick = onCancel) { Text("Huỷ") }
+                }
+                else -> {
+                    if (note.isNotEmpty()) Text(note)
+                    if (!ready) {
+                        Text("Chưa có mô hình AI", style = MaterialTheme.typography.titleMedium)
+                        Text("Chọn file mô hình đuôi .task bạn đã tải về máy (ví dụ gemma-3n-E4B-it-int4.task trong " +
+                            "thư mục Download). App sẽ chép file vào bộ nhớ riêng của nó, sau đó bạn có thể xoá bản trong Download.")
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = onPick) { Text(if (ready) "Chọn mô hình khác" else "Chọn file mô hình") }
+                        if (ready) TextButton(onClick = onDismiss) { Text("Đóng") }
+                    }
+                }
+            }
         }
     }
 }
