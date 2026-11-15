@@ -31,6 +31,7 @@ import kotlin.math.sqrt
 class VoiceId(private val ctx: Context, private val db: AppDb) {
     private val modelFile get() = File(ctx.getExternalFilesDir(null), "speaker.onnx")
     private var extractor: SpeakerEmbeddingExtractor? = null
+    private var loadedStamp = 0L // giờ sửa file lúc nạp; đổi file (chọn mô hình mới) thì nạp lại
 
     /** Ngưỡng giống nhau. Cao hơn thì khó bị giả hơn nhưng dễ từ chối nhầm chính bạn. */
     var threshold = 0.6f
@@ -49,7 +50,6 @@ class VoiceId(private val ctx: Context, private val db: AppDb) {
             "\"$name\" là file của mô hình nghe tiếng Anh, không phải mô hình nhận giọng. Hãy chọn nó ở mục \"Nghe tiếng Anh\"."
         }
         ModelFiles.copy(ctx, uri, modelFile)
-        extractor = null // lần sau sẽ nạp mô hình mới
     }
     fun micAllowed() = ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     suspend fun enrolled() = db.voice().get() != null
@@ -74,6 +74,8 @@ class VoiceId(private val ctx: Context, private val db: AppDb) {
     }
 
     private suspend fun embed(samples: FloatArray): FloatArray = withContext(Dispatchers.Default) {
+        val stamp = modelFile.lastModified()
+        if (stamp != loadedStamp) { extractor = null; loadedStamp = stamp }
         val ex = extractor ?: SpeakerEmbeddingExtractor(
             config = SpeakerEmbeddingExtractorConfig(model = modelFile.absolutePath, numThreads = 2)
         ).also { extractor = it }

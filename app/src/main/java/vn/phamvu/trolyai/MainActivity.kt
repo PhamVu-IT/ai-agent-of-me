@@ -31,10 +31,10 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import vn.phamvu.trolyai.data.InterviewProfile
-import vn.phamvu.trolyai.interview.EnglishAsr
 import vn.phamvu.trolyai.interview.InterviewCoach
 import vn.phamvu.trolyai.interview.InterviewService
 import vn.phamvu.trolyai.models.AsrModelSection
+import vn.phamvu.trolyai.models.ModelPickers
 import vn.phamvu.trolyai.models.ModelsScreen
 import vn.phamvu.trolyai.models.SpeakerModelSection
 import vn.phamvu.trolyai.security.BiometricAuthenticator
@@ -68,12 +68,38 @@ class MainActivity : FragmentActivity() {
     // Chọn file mô hình (.task) từ bộ nhớ máy, thẻ nhớ hoặc Google Drive. File .task không có kiểu MIME
     // riêng nên phải cho chọn mọi loại file, rồi kiểm tra đuôi sau.
     private val pickModel = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        pickingFile = false
         uri?.let(vm::importModel)
     }
+    private val pickSpeaker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        pickingFile = false
+        uri?.let(vm::importSpeaker)
+    }
+    private val pickAsrFiles = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        pickingFile = false
+        if (uris.isNotEmpty()) vm.importAsrFiles(uris)
+    }
+    private val pickAsrFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        pickingFile = false
+        tree?.let(vm::importAsrFolder)
+    }
+    /**
+     * Đang mở trình chọn file: app tạm ẩn nhưng không được khoá lại, nếu không thì khi quay về sẽ hiện màn hình
+     * khoá, mất màn hình đang mở và file vừa chọn không được lưu.
+     */
+    private var pickingFile = false
+    private val pickers = ModelPickers(
+        model = { pickingFile = true; pickModel.launch(arrayOf("*/*")) },
+        speaker = { pickingFile = true; pickSpeaker.launch(arrayOf("*/*")) },
+        asrFiles = { pickingFile = true; pickAsrFiles.launch(arrayOf("*/*")) },
+        asrFolder = { pickingFile = true; pickAsrFolder.launch(null) },
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         listenWhenReady = savedInstanceState == null
+        savedInstanceState?.getString("screen")?.let { screen.value = it }
+        pickingFile = savedInstanceState?.getBoolean("picking") ?: false
         val perms = mutableListOf(Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= 33) perms += Manifest.permission.POST_NOTIFICATIONS
         askPermissions.launch(perms.toTypedArray())
@@ -88,11 +114,9 @@ class MainActivity : FragmentActivity() {
                 Surface(Modifier.fillMaxSize()) {
                     when {
                         !unlocked.value -> LockedScreen(noLockSet = !auth.isAvailable(), onUnlock = ::unlock)
-                        screen.value == "giong" -> VoiceEnrollScreen(voice, onDone = { screen.value = "chat" })
-                        screen.value == "phongvan" -> InterviewScreen(onBack = { screen.value = "chat" })
-                        screen.value == "mohinh" -> ModelsScreen(vm, voice,
-                            onPickModel = { pickModel.launch(arrayOf("*/*")) },
-                            onBack = { screen.value = "chat" })
+                        screen.value == "giong" -> VoiceEnrollScreen(voice, vm, pickers, onDone = { screen.value = "chat" })
+                        screen.value == "phongvan" -> InterviewScreen(vm, pickers, onBack = { screen.value = "chat" })
+                        screen.value == "mohinh" -> ModelsScreen(vm, pickers, onBack = { screen.value = "chat" })
                         else -> ChatScreen(vm,
                             onMic = ::listen,
                             onSpeak = { tts?.speak(it, TextToSpeech.QUEUE_FLUSH, null, "r") },
@@ -100,7 +124,7 @@ class MainActivity : FragmentActivity() {
                             onVoiceSetup = { lifecycleScope.launch { if (auth.confirm("Đăng ký giọng chủ máy")) screen.value = "giong" } },
                             onBankSetup = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
                             onInterview = { screen.value = "phongvan" },
-                            onPickModel = { pickModel.launch(arrayOf("*/*")) },
+                            onPickModel = pickers.model,
                             onModels = { screen.value = "mohinh" })
                     }
                     voicePrompt.value?.let { msg ->
@@ -122,6 +146,7 @@ class MainActivity : FragmentActivity() {
         super.onStart()
         if (backgroundSince > 0 && System.currentTimeMillis() - backgroundSince > 60_000) unlocked.value = false
         vm.refreshModel() // có thể vừa adb push mô hình vào máy
+        vm.refreshSideModels()
         if (!unlocked.value) unlock() else listenIfAsked()
     }
 
@@ -131,9 +156,15 @@ class MainActivity : FragmentActivity() {
         listen()
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString("screen", screen.value)
+        outState.putBoolean("picking", pickingFile)
+    }
+
     override fun onStop() {
         super.onStop()
-        if (!authenticating) backgroundSince = System.currentTimeMillis()
+        if (!authenticating && !pickingFile) backgroundSince = System.currentTimeMillis()
     }
 
     private fun unlock() {
@@ -171,7 +202,7 @@ fun LockedScreen(noLockSet: Boolean, onUnlock: () -> Unit) {
 
 /** Đăng ký giọng: đọc 5 câu, mỗi câu thu 4 giây. */
 @Composable
-fun VoiceEnrollScreen(voice: VoiceId, onDone: () -> Unit) {
+fun VoiceEnrollScreen(voice: VoiceId, vm: ChatViewModel, pickers: ModelPickers, onDone: () -> Unit) {
     val sentences = listOf(
         "Hôm nay trời đẹp, tôi muốn đi dạo một vòng.",
         "Nhắc tôi đóng tiền nhà vào ngày mùng năm hằng tháng.",
@@ -183,14 +214,13 @@ fun VoiceEnrollScreen(voice: VoiceId, onDone: () -> Unit) {
     var status by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    var modelReady by remember { mutableStateOf(voice.modelReady()) }
 
     Column(Modifier.fillMaxSize().systemBarsPadding().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("Đăng ký giọng của bạn", style = MaterialTheme.typography.titleLarge)
         when {
-            !modelReady -> {
+            !vm.speakerReady.value -> {
                 Text("Cần mô hình nhận giọng trước đã.")
-                SpeakerModelSection(voice, onChanged = { modelReady = voice.modelReady() })
+                SpeakerModelSection(vm, pickers)
             }
             !voice.micAllowed() -> Text("App chưa được phép dùng micro. Hãy cấp quyền micro trong Cài đặt.")
             clips.size < sentences.size -> {
@@ -206,7 +236,7 @@ fun VoiceEnrollScreen(voice: VoiceId, onDone: () -> Unit) {
                     busy = true; status = "Đang tạo dấu vân giọng…"
                     scope.launch {
                         status = try { voice.enroll(clips); "✅ Xong! Từ giờ lệnh nhạy cảm sẽ thử nhận giọng trước." }
-                        catch (e: Exception) { "Lỗi: ${e.message}" }
+                        catch (e: Throwable) { "Lỗi: ${e.message ?: e.javaClass.simpleName}" }
                         busy = false
                     }
                 }) { Text("Lưu giọng của tôi") }
@@ -335,7 +365,7 @@ fun ModelCard(
  * và ô luyện tập gõ câu hỏi để thử gợi ý.
  */
 @Composable
-fun InterviewScreen(onBack: () -> Unit) {
+fun InterviewScreen(vm: ChatViewModel, pickers: ModelPickers, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val app = ctx.applicationContext as App
     val scope = rememberCoroutineScope()
@@ -347,7 +377,7 @@ fun InterviewScreen(onBack: () -> Unit) {
     // Đọc lại mỗi lần bấm "Kiểm tra lại", vì người dùng có thể vừa sang Cài đặt cấp quyền
     var check by remember { mutableIntStateOf(0) }
     val llmReady = remember(check) { app.llm.modelFile.exists() }
-    val asrReady = remember(check) { EnglishAsr(ctx).modelReady() }
+    val asrReady = vm.asrMissing.value.isEmpty()
     val overlayOk = remember(check) { Settings.canDrawOverlays(ctx) }
     val micOk = remember(check) { ctx.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED }
     val running = InterviewService.running.value
@@ -372,7 +402,7 @@ fun InterviewScreen(onBack: () -> Unit) {
         Text((if (llmReady) "✅" else "❌") + " Mô hình AI (model.task)" +
             if (llmReady) "" else ": chọn ở nút 🧠 Mô hình trên màn hình chat")
         Text((if (asrReady) "✅" else "❌") + " Mô hình nghe tiếng Anh")
-        if (!asrReady) AsrModelSection(onChanged = { check++ })
+        if (!asrReady || vm.asrNote.value.isNotEmpty()) AsrModelSection(vm, pickers)
         Text((if (micOk) "✅" else "❌") + " Quyền dùng micro")
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text((if (overlayOk) "✅" else "❌") + " Quyền hiện trên ứng dụng khác", Modifier.weight(1f))
@@ -380,7 +410,7 @@ fun InterviewScreen(onBack: () -> Unit) {
                 ctx.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")))
             }) { Text("Cấp quyền") }
         }
-        OutlinedButton(onClick = { check++ }) { Text("Kiểm tra lại") }
+        OutlinedButton(onClick = { check++; vm.refreshSideModels() }) { Text("Kiểm tra lại") }
 
         if (running) {
             Button(onClick = { InterviewService.stop(ctx) }, Modifier.fillMaxWidth()) { Text("Tắt chế độ ẩn") }
@@ -402,7 +432,7 @@ fun InterviewScreen(onBack: () -> Unit) {
             scope.launch {
                 saveProfile()
                 practiceOut = try { InterviewCoach(app.llm, app.db).suggest(practice.trim()) }
-                catch (e: Exception) { "Lỗi: ${e.message}" }
+                catch (e: Throwable) { "Lỗi: ${e.message ?: e.javaClass.simpleName}" }
                 busy = false
             }
         }) { Text("Gợi ý trả lời") }

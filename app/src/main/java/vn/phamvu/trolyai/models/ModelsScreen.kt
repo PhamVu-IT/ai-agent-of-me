@@ -1,30 +1,34 @@
 package vn.phamvu.trolyai.models
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.launch
 import vn.phamvu.trolyai.ChatViewModel
 import vn.phamvu.trolyai.ModelCard
-import vn.phamvu.trolyai.interview.EnglishAsr
-import vn.phamvu.trolyai.voice.VoiceId
+
+/**
+ * Mở trình chọn file của Android. Các trình chọn được đăng ký ở MainActivity (không phải trong từng màn hình),
+ * để kết quả vẫn về đúng chỗ dù app bị khoá lại hay màn hình đã đổi trong lúc bạn đang chọn file.
+ */
+class ModelPickers(
+    val model: () -> Unit,
+    val speaker: () -> Unit,
+    val asrFiles: () -> Unit,
+    val asrFolder: () -> Unit,
+)
 
 /** Một chỗ xem và chọn cả ba mô hình: AI (model.task), nhận giọng chủ máy, nghe tiếng Anh. */
 @Composable
-fun ModelsScreen(vm: ChatViewModel, voice: VoiceId, onPickModel: () -> Unit, onBack: () -> Unit) {
-    val progress = vm.importProgress.value
+fun ModelsScreen(vm: ChatViewModel, pickers: ModelPickers, onBack: () -> Unit) {
+    val busy = vm.importProgress.value != null || vm.speakerBusy.value || vm.asrBusy.value
     val view = LocalView.current
-    DisposableEffect(progress != null) {
-        view.keepScreenOn = progress != null
+    DisposableEffect(busy) {
+        view.keepScreenOn = busy
         onDispose { view.keepScreenOn = false }
     }
     Column(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp).verticalScroll(rememberScrollState()),
@@ -37,18 +41,18 @@ fun ModelsScreen(vm: ChatViewModel, voice: VoiceId, onPickModel: () -> Unit, onB
             style = MaterialTheme.typography.titleMedium)
         ModelCard(
             ready = vm.modelReady.value,
-            progress = progress,
+            progress = vm.importProgress.value,
             loading = vm.importLoading.value,
             note = vm.importNote.value,
-            onPick = onPickModel,
+            onPick = pickers.model,
             onCancel = vm::cancelImport,
             onDismiss = { vm.importNote.value = "" },
         )
 
         HorizontalDivider()
-        SpeakerModelSection(voice)
+        SpeakerModelSection(vm, pickers)
         HorizontalDivider()
-        AsrModelSection()
+        AsrModelSection(vm, pickers)
         Spacer(Modifier.height(8.dp))
         Button(onClick = onBack) { Text("Quay lại") }
     }
@@ -56,33 +60,20 @@ fun ModelsScreen(vm: ChatViewModel, voice: VoiceId, onPickModel: () -> Unit, onB
 
 /** Mô hình nhận giọng chủ máy: chọn một file .onnx, app lưu thành speaker.onnx. */
 @Composable
-fun SpeakerModelSection(voice: VoiceId, onChanged: () -> Unit = {}) {
-    val scope = rememberCoroutineScope()
-    var ready by remember { mutableStateOf(voice.modelReady()) }
-    var busy by remember { mutableStateOf(false) }
-    var note by remember { mutableStateOf("") }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        busy = true; note = "Đang chép…"
-        scope.launch {
-            note = try { voice.importModel(uri); "✅ Đã cài mô hình nhận giọng." }
-            catch (e: CancellationException) { throw e }
-            catch (e: Exception) { "Lỗi: ${e.message}" }
-            ready = voice.modelReady(); busy = false
-            onChanged()
-        }
-    }
+fun SpeakerModelSection(vm: ChatViewModel, pickers: ModelPickers) {
+    val ready = vm.speakerReady.value
+    val busy = vm.speakerBusy.value
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text((if (ready) "✅" else "❌") + " Nhận giọng chủ máy (.onnx)", style = MaterialTheme.typography.titleMedium)
-        Text(if (ready) "Đã có (${voice.modelSizeMb()} MB)." else
+        Text(if (ready) "Đã có (${vm.speakerSizeMb()} MB)." else
             "Tải file 3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx ở trang releases của " +
             "k2-fsa/sherpa-onnx, mục speaker-recongition-models, rồi chọn nó. Tên file là gì cũng được.",
             style = MaterialTheme.typography.bodySmall)
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-        Button(enabled = !busy, onClick = { picker.launch(arrayOf("*/*")) }) {
+        Button(enabled = !busy, onClick = pickers.speaker) {
             Text(if (ready) "Chọn file khác" else "Chọn file .onnx")
         }
-        if (note.isNotEmpty()) Text(note)
+        if (vm.speakerNote.value.isNotEmpty()) Text(vm.speakerNote.value)
     }
 }
 
@@ -91,34 +82,9 @@ fun SpeakerModelSection(voice: VoiceId, onChanged: () -> Unit = {}) {
  * các file lẻ, hoặc thư mục đã giải nén.
  */
 @Composable
-fun AsrModelSection(onChanged: () -> Unit = {}) {
-    val ctx = LocalContext.current
-    val asr = remember { EnglishAsr(ctx) }
-    val scope = rememberCoroutineScope()
-    var missing by remember { mutableStateOf(asr.missing()) }
-    var busy by remember { mutableStateOf(false) }
-    var note by remember { mutableStateOf("") }
-    val view = LocalView.current
-    DisposableEffect(busy) {
-        view.keepScreenOn = busy
-        onDispose { view.keepScreenOn = false }
-    }
-    fun startImport(block: suspend () -> String) {
-        busy = true; note = "Đang chép, file lớn có thể mất một hai phút. Để app mở nhé…"
-        scope.launch {
-            note = try { block() }
-            catch (e: CancellationException) { throw e }
-            catch (e: Exception) { "Lỗi: ${e.message}" }
-            missing = asr.missing(); busy = false
-            onChanged()
-        }
-    }
-    val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) startImport { asr.importFiles(uris) }
-    }
-    val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
-        if (tree != null) startImport { asr.importFolder(tree) }
-    }
+fun AsrModelSection(vm: ChatViewModel, pickers: ModelPickers) {
+    val missing = vm.asrMissing.value
+    val busy = vm.asrBusy.value
     val ready = missing.isEmpty()
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text((if (ready) "✅" else "❌") + " Nghe tiếng Anh (phỏng vấn)", style = MaterialTheme.typography.titleMedium)
@@ -130,9 +96,9 @@ fun AsrModelSection(onChanged: () -> Unit = {}) {
             style = MaterialTheme.typography.bodySmall)
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(enabled = !busy, onClick = { pickFiles.launch(arrayOf("*/*")) }) { Text("Chọn file") }
-            OutlinedButton(enabled = !busy, onClick = { pickFolder.launch(null) }) { Text("Chọn thư mục") }
+            Button(enabled = !busy, onClick = pickers.asrFiles) { Text("Chọn file") }
+            OutlinedButton(enabled = !busy, onClick = pickers.asrFolder) { Text("Chọn thư mục") }
         }
-        if (note.isNotEmpty()) Text(note)
+        if (vm.asrNote.value.isNotEmpty()) Text(vm.asrNote.value)
     }
 }
