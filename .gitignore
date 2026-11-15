@@ -6,3 +6,4 @@ local.properties
 app/libs/*.aar
 *.task
 *.onnx
+.DS_Store

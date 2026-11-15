@@ -51,6 +51,6 @@ dependencies {
     implementation("androidx.sqlite:sqlite-ktx:2.4.0")
 
     // Nhận diện giọng chủ máy: tải sherpa-onnx-*.aar từ GitHub releases của k2-fsa/sherpa-onnx,
-    // đổi tên thành sherpa-onnx.aar và đặt vào app/libs/
-    implementation(files("libs/sherpa-onnx.aar"))
+    // đổi tên thành sherpa-onnx.aar và đặt vào app/libs/ (mọi .aar/.jar trong libs/ đều được nạp)
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
 }
