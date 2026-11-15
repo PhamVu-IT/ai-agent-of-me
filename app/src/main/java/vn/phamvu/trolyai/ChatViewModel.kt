@@ -12,6 +12,8 @@ import kotlinx.coroutines.launch
 import vn.phamvu.trolyai.agent.ActionExecutor
 import vn.phamvu.trolyai.agent.Assistant
 import vn.phamvu.trolyai.data.ChatMessage
+import vn.phamvu.trolyai.interview.EnglishAsr
+import vn.phamvu.trolyai.voice.VoiceId
 import vn.phamvu.trolyai.learn.Profile
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
@@ -61,6 +63,51 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun cancelImport() { importJob?.cancel() }
+
+    // Mô hình nhận giọng và nghe tiếng Anh. Chép trong ViewModel để không bị mất khi đổi màn hình,
+    // khoá app hay xoay máy giữa chừng.
+    private val voiceFiles = VoiceId(app, db)
+    private val asrFiles = EnglishAsr(app)
+    val speakerReady = mutableStateOf(voiceFiles.modelReady())
+    val speakerBusy = mutableStateOf(false)
+    val speakerNote = mutableStateOf("")
+    val asrMissing = mutableStateOf(asrFiles.missing())
+    val asrBusy = mutableStateOf(false)
+    val asrNote = mutableStateOf("")
+
+    fun speakerSizeMb() = voiceFiles.modelSizeMb()
+
+    fun refreshSideModels() {
+        speakerReady.value = voiceFiles.modelReady()
+        asrMissing.value = asrFiles.missing()
+    }
+
+    fun importSpeaker(uri: Uri) {
+        if (speakerBusy.value) return
+        speakerBusy.value = true
+        speakerNote.value = "Đang chép…"
+        viewModelScope.launch {
+            speakerNote.value = try { voiceFiles.importModel(uri); "✅ Đã cài mô hình nhận giọng." }
+            catch (e: CancellationException) { throw e }
+            catch (e: Throwable) { "Lỗi: ${e.message ?: e.javaClass.simpleName}" }
+            finally { speakerBusy.value = false; refreshSideModels() }
+        }
+    }
+
+    fun importAsrFiles(uris: List<Uri>) = importAsr { asrFiles.importFiles(uris) }
+    fun importAsrFolder(tree: Uri) = importAsr { asrFiles.importFolder(tree) }
+
+    private fun importAsr(block: suspend () -> String) {
+        if (asrBusy.value) return
+        asrBusy.value = true
+        asrNote.value = "Đang chép, file lớn có thể mất một hai phút. Để app mở nhé…"
+        viewModelScope.launch {
+            asrNote.value = try { block() }
+            catch (e: CancellationException) { throw e }
+            catch (e: Throwable) { "Lỗi: ${e.message ?: e.javaClass.simpleName}" }
+            finally { asrBusy.value = false; refreshSideModels() }
+        }
+    }
 
     init {
         viewModelScope.launch {
