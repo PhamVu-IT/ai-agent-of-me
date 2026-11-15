@@ -6,7 +6,7 @@
 
 ```
  Bạn (gõ / nói)
-     │  SpeechRecognizer (offline, vi-VN)
+     │  sherpa-onnx zipformer-vi (offline) → dự phòng SpeechRecognizer của máy
      ▼
  ChatViewModel ──► Assistant ("bộ não")
                      │ 1. lấy trí nhớ liên quan + lịch sử chat từ Room
@@ -81,9 +81,16 @@ Tải từ Hugging Face, trang `litert-community` (cần đăng nhập và chấ
    ```
 
    > Vì sao phải chọn trong app: từ Android 11, trình quản lý file (kể cả My Files của Samsung) không còn
-   > chép được vào thư mục `Android/data`. Chip **🧠 Mô hình** liệt kê cả ba mô hình, có ✅ / ❌ cho biết cái nào đã sẵn sàng.
+   > chép được vào thư mục `Android/data`. Chip **🧠 Mô hình** liệt kê các mô hình, có ✅ / ❌ cho biết cái nào đã sẵn sàng.
 5. Đọc biến động số dư: bấm **🏦 Đọc biến động số dư**, bật "Trợ lý AI" trong danh sách Truy cập thông báo.
-6. Để nhận giọng nói offline: Cài đặt → Google → Giọng nói → Nhận dạng giọng nói ngoại tuyến → tải Tiếng Việt.
+6. Để nói tiếng Việt khi không có mạng (không cần app Google): tải
+   `sherpa-onnx-zipformer-vi-int8-2025-04-20.tar.bz2` ở [releases của k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models)
+   (bản nhỏ hơn: `sherpa-onnx-zipformer-vi-30M-int8-2026-02-09.tar.bz2`), rồi vào **🧠 Mô hình → Nghe tiếng Việt offline**
+   bấm **Chọn file** và chọn thẳng file đó, không cần giải nén. Nút 🎤 sẽ nghe ngay trong app, nói xong ngừng khoảng
+   1 giây là app tự nhận dạng.
+   Chưa có mô hình này thì app dùng bộ nhận giọng của máy (cần app Google hoặc dịch vụ giọng nói của Samsung,
+   và thường cần mạng). App không còn mở hộp thoại "Voice search" của Google, nên không còn lỗi
+   "Voice search Google not available" khi mở app.
 7. Để nhắc đúng phút trên Android 12+: Cài đặt → Ứng dụng → Trợ lý AI → cho phép **Báo thức và lời nhắc**.
 
 Thử nói:

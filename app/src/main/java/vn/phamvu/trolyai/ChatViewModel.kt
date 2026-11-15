@@ -13,6 +13,7 @@ import vn.phamvu.trolyai.agent.ActionExecutor
 import vn.phamvu.trolyai.agent.Assistant
 import vn.phamvu.trolyai.data.ChatMessage
 import vn.phamvu.trolyai.interview.EnglishAsr
+import vn.phamvu.trolyai.voice.VietnameseAsr
 import vn.phamvu.trolyai.voice.VoiceId
 import vn.phamvu.trolyai.learn.Profile
 
@@ -83,12 +84,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val asrMissing = mutableStateOf(asrFiles.missing())
     val asrBusy = mutableStateOf(false)
     val asrNote = mutableStateOf("")
+    // Mô hình nghe tiếng Việt offline (nút 🎤), chọn giống mô hình tiếng Anh
+    private val viAsrFiles = VietnameseAsr(app)
+    val viAsrMissing = mutableStateOf(viAsrFiles.missing())
+    val viAsrBusy = mutableStateOf(false)
+    val viAsrNote = mutableStateOf("")
 
     fun speakerSizeMb() = voiceFiles.modelSizeMb()
 
     fun refreshSideModels() {
         speakerReady.value = voiceFiles.modelReady()
         asrMissing.value = asrFiles.missing()
+        viAsrMissing.value = viAsrFiles.missing()
     }
 
     fun importSpeaker(uri: Uri) {
@@ -105,6 +112,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun importAsrFiles(uris: List<Uri>) = importAsr { asrFiles.importFiles(uris) }
     fun importAsrFolder(tree: Uri) = importAsr { asrFiles.importFolder(tree) }
+
+    fun importViAsrFiles(uris: List<Uri>) = importViAsr { viAsrFiles.importFiles(uris) }
+    fun importViAsrFolder(tree: Uri) = importViAsr { viAsrFiles.importFolder(tree) }
+
+    private fun importViAsr(block: suspend () -> String) {
+        if (viAsrBusy.value) return
+        viAsrBusy.value = true
+        viAsrNote.value = "Đang chép, file lớn có thể mất một hai phút. Để app mở nhé…"
+        viewModelScope.launch {
+            viAsrNote.value = try { block() }
+            catch (e: CancellationException) { throw e }
+            catch (e: Throwable) { "Lỗi: ${e.message ?: e.javaClass.simpleName}" }
+            finally { viAsrBusy.value = false; refreshSideModels() }
+        }
+    }
 
     private fun importAsr(block: suspend () -> String) {
         if (asrBusy.value) return
