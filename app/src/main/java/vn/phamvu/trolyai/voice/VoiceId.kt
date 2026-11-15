@@ -76,9 +76,11 @@ class VoiceId(private val ctx: Context, private val db: AppDb) {
     private suspend fun embed(samples: FloatArray): FloatArray = withContext(Dispatchers.Default) {
         val stamp = modelFile.lastModified()
         if (stamp != loadedStamp) { extractor = null; loadedStamp = stamp }
-        val ex = extractor ?: SpeakerEmbeddingExtractor(
-            config = SpeakerEmbeddingExtractorConfig(model = modelFile.absolutePath, numThreads = 2)
-        ).also { extractor = it }
+        val ex = extractor ?: SherpaLibs.run(ctx) {
+            SpeakerEmbeddingExtractor(
+                config = SpeakerEmbeddingExtractorConfig(model = modelFile.absolutePath, numThreads = 2)
+            )
+        }.also { extractor = it }
         val stream = ex.createStream()
         stream.acceptWaveform(samples, 16_000)
         stream.inputFinished()

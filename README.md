@@ -54,6 +54,10 @@ Tải từ Hugging Face, trang `litert-community` (cần đăng nhập và chấ
 1. Cài Android Studio (bản mới), chọn **Open** thư mục này. Android Studio tự tải Gradle và SDK.
    Trước khi build: vào https://github.com/k2-fsa/sherpa-onnx/releases, tải file `sherpa-onnx-<phiên bản>.aar`,
    đổi tên thành `sherpa-onnx.aar` và đặt vào thư mục `app/libs/`. Thiếu file này app sẽ không build được.
+   Chọn bản Android thường (`sherpa-onnx-1.x.y.aar`), không phải file `.jar` hay bản có chữ `rknn`/`qnn`. Chỉ để
+   một file `.aar` trong `app/libs/`. Khi build, Gradle tự kiểm tra file này có thư viện `libsherpa-onnx-jni.so`
+   cho điện thoại 64-bit hay không và báo lỗi ngay nếu sai. Sau khi thay file aar, bấm **Build > Clean Project**
+   rồi mới **Run**, nếu không app có thể vẫn báo "library libsherpa-onnx-jni.so not found" lúc lưu giọng.
 2. Bật Developer options + USB debugging trên điện thoại, cắm cáp, bấm **Run**.
 3. Đưa mô hình vào app, chọn một trong hai cách:
    - **Chọn ngay trong app (dễ nhất):** tải file `.task` về điện thoại (thường nằm trong thư mục Download),

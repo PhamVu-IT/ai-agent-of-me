@@ -96,7 +96,7 @@ class InterviewService : Service() {
             ui { overlay.status("Chưa có mô hình nghe tiếng Anh. Xem README, mục Chế độ phỏng vấn.") }
             return
         }
-        val asr = try { asrFiles.create() } catch (e: Exception) {
+        val asr = try { asrFiles.create() } catch (e: Throwable) {
             ui { overlay.status("Không mở được mô hình nghe: ${e.message}") }; return
         }
         val rate = EnglishAsr.SAMPLE_RATE
