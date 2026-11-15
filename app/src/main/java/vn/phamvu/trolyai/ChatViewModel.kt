@@ -25,6 +25,15 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val messages = mutableStateListOf<ChatMessage>()
     val thinking = mutableStateOf(false)
 
+    /**
+     * Câu trả lời mới cần đọc to, null khi không có gì để đọc. Chỉ đặt khi trợ lý vừa trả lời trong lúc
+     * đang dùng app, không đặt cho tin cũ nạp lại từ máy, nên back rồi mở lại app không đọc lại câu cũ.
+     */
+    val toSpeak = mutableStateOf<ChatMessage?>(null)
+
+    /** Màn hình gọi sau khi đã đọc xong một câu, để xoay máy hay quay lại màn chat không đọc lại. */
+    fun markSpoken(m: ChatMessage) { if (toSpeak.value?.id == m.id) toSpeak.value = null }
+
     /** Đã có file mô hình AI trong máy chưa; chưa có thì màn hình chat hiện nút chọn file. */
     val modelReady = mutableStateOf(llm.hasModel())
     /** Tiến độ chép mô hình 0..1, null khi không chép. */
@@ -154,6 +163,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun add(m: ChatMessage) {
         val id = db.chats().insert(m)
-        messages.add(m.copy(id = id))
+        val saved = m.copy(id = id)
+        messages.add(saved)
+        if (!saved.fromUser) toSpeak.value = saved
     }
 }
