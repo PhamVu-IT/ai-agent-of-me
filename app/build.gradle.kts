@@ -14,6 +14,8 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1"
+        // Chỉ đóng gói thư viện C++ cho máy thật 64-bit (Samsung S23 Ultra...) và máy ảo x86_64: APK nhẹ hơn
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
     buildFeatures { compose = true }
     compileOptions {
@@ -54,6 +56,29 @@ dependencies {
     implementation("org.apache.commons:commons-compress:1.27.1")
 
     // Nhận diện giọng chủ máy: tải sherpa-onnx-*.aar từ GitHub releases của k2-fsa/sherpa-onnx,
-    // đổi tên thành sherpa-onnx.aar và đặt vào app/libs/ (mọi .aar/.jar trong libs/ đều được nạp)
+    // đổi tên thành sherpa-onnx.aar và đặt vào app/libs/ (mọi .aar/.jar trong libs/ đều được nạp,
+    // kể cả thư viện C++ bên trong aar). Task kiemTraSherpaOnnx bên dưới kiểm tra file này trước khi build.
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
 }
+
+// Kiểm tra file sherpa-onnx.aar trước khi build. Thiếu file, chọn nhầm file, hoặc file không có thư viện C++
+// cho arm64-v8a thì app vẫn build được nhưng lúc lưu giọng sẽ báo "library libsherpa-onnx-jni.so not found".
+// Báo lỗi ngay lúc build cho dễ sửa.
+val kiemTraSherpaOnnx by tasks.registering {
+    val libsDir = file("libs")
+    doLast {
+        val aars = libsDir.listFiles(java.io.FileFilter { it.name.endsWith(".aar") }).orEmpty().toList()
+        val huongDan = "Tải file sherpa-onnx-<phiên bản>.aar (bản Android thường, không phải .jar hay bản có chữ " +
+            "\"rknn\"/\"qnn\"/\"ascend\") ở https://github.com/k2-fsa/sherpa-onnx/releases, đặt vào " +
+            "${libsDir.absolutePath} rồi bấm Build > Clean Project và chạy lại."
+        if (aars.isEmpty()) throw GradleException("Chưa có sherpa-onnx.aar trong app/libs/. $huongDan")
+        if (aars.size > 1) throw GradleException(
+            "Có ${aars.size} file .aar trong app/libs/ (${aars.joinToString { it.name }}). Chỉ giữ lại một file.")
+        val aar = aars.single()
+        val entries = java.util.zip.ZipFile(aar).use { z -> z.entries().asSequence().map { it.name }.toSet() }
+        val canCo = "jni/arm64-v8a/libsherpa-onnx-jni.so"
+        if (canCo !in entries) throw GradleException(
+            "File ${aar.name} không có $canCo nên app sẽ báo lỗi thiếu thư viện khi lưu giọng. $huongDan")
+    }
+}
+tasks.named("preBuild") { dependsOn(kiemTraSherpaOnnx) }

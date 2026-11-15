@@ -19,7 +19,7 @@ class VoiceThenBiometric(
         if (voice.modelReady() && voice.micAllowed() && voice.enrolled()) {
             prompt.value = "🎙️ $reason\nHãy nói: \"Tôi là chủ máy, xác nhận\""
             delay(400)
-            val score = try { voice.score(voice.record(3)) } catch (e: Exception) { 0f }
+            val score = try { voice.score(voice.record(3)) } catch (e: Throwable) { 0f } // kể cả thiếu thư viện: chuyển sang vân tay
             prompt.value = null
             if (score >= voice.threshold) return true
         }

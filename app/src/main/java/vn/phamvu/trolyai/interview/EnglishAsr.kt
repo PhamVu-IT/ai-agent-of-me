@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import vn.phamvu.trolyai.models.ModelFiles
+import vn.phamvu.trolyai.voice.SherpaLibs
 import java.io.File
 import java.io.InputStream
 import java.util.zip.ZipInputStream
@@ -160,7 +161,7 @@ class EnglishAsr(private val ctx: Context) {
 
     fun create(): OnlineRecognizer {
         require(modelReady()) { "Chưa có mô hình nghe tiếng Anh trong ${dir.absolutePath}" }
-        return OnlineRecognizer(config = OnlineRecognizerConfig(
+        return SherpaLibs.run(ctx) { OnlineRecognizer(config = OnlineRecognizerConfig(
             featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = 80),
             modelConfig = OnlineModelConfig(
                 transducer = OnlineTransducerModelConfig(
@@ -178,7 +179,7 @@ class EnglishAsr(private val ctx: Context) {
                 rule2 = EndpointRule(true, 1.0f, 0f),
                 rule3 = EndpointRule(false, 0f, 20f),
             ),
-        ))
+        )) }
     }
 
     companion object {
