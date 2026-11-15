@@ -34,6 +34,9 @@ import vn.phamvu.trolyai.data.InterviewProfile
 import vn.phamvu.trolyai.interview.EnglishAsr
 import vn.phamvu.trolyai.interview.InterviewCoach
 import vn.phamvu.trolyai.interview.InterviewService
+import vn.phamvu.trolyai.models.AsrModelSection
+import vn.phamvu.trolyai.models.ModelsScreen
+import vn.phamvu.trolyai.models.SpeakerModelSection
 import vn.phamvu.trolyai.security.BiometricAuthenticator
 import vn.phamvu.trolyai.security.VoiceThenBiometric
 import vn.phamvu.trolyai.voice.VoiceId
@@ -50,7 +53,7 @@ class MainActivity : FragmentActivity() {
     private var backgroundSince = 0L
     private var authenticating = false // màn hình nhập PIN làm app tạm ẩn, tránh hỏi lại hai lần
 
-    private val screen = mutableStateOf("chat")          // "chat", "giong" hoặc "phongvan"
+    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan" hoặc "mohinh"
     private val voicePrompt = mutableStateOf<String?>(null) // dòng chữ khi đang nghe để nhận giọng
 
     // Nhận giọng nói (Android hỗ trợ offline nếu đã tải gói tiếng Việt trong Google app)
@@ -87,6 +90,9 @@ class MainActivity : FragmentActivity() {
                         !unlocked.value -> LockedScreen(noLockSet = !auth.isAvailable(), onUnlock = ::unlock)
                         screen.value == "giong" -> VoiceEnrollScreen(voice, onDone = { screen.value = "chat" })
                         screen.value == "phongvan" -> InterviewScreen(onBack = { screen.value = "chat" })
+                        screen.value == "mohinh" -> ModelsScreen(vm, voice,
+                            onPickModel = { pickModel.launch(arrayOf("*/*")) },
+                            onBack = { screen.value = "chat" })
                         else -> ChatScreen(vm,
                             onMic = ::listen,
                             onSpeak = { tts?.speak(it, TextToSpeech.QUEUE_FLUSH, null, "r") },
@@ -94,7 +100,8 @@ class MainActivity : FragmentActivity() {
                             onVoiceSetup = { lifecycleScope.launch { if (auth.confirm("Đăng ký giọng chủ máy")) screen.value = "giong" } },
                             onBankSetup = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
                             onInterview = { screen.value = "phongvan" },
-                            onPickModel = { pickModel.launch(arrayOf("*/*")) })
+                            onPickModel = { pickModel.launch(arrayOf("*/*")) },
+                            onModels = { screen.value = "mohinh" })
                     }
                     voicePrompt.value?.let { msg ->
                         Dialog(onDismissRequest = {}) {
@@ -176,11 +183,15 @@ fun VoiceEnrollScreen(voice: VoiceId, onDone: () -> Unit) {
     var status by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    var modelReady by remember { mutableStateOf(voice.modelReady()) }
 
     Column(Modifier.fillMaxSize().systemBarsPadding().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("Đăng ký giọng của bạn", style = MaterialTheme.typography.titleLarge)
         when {
-            !voice.modelReady() -> Text("Chưa có mô hình nhận giọng. Hãy chép file speaker.onnx vào máy (xem README).")
+            !modelReady -> {
+                Text("Cần mô hình nhận giọng trước đã.")
+                SpeakerModelSection(voice, onChanged = { modelReady = voice.modelReady() })
+            }
             !voice.micAllowed() -> Text("App chưa được phép dùng micro. Hãy cấp quyền micro trong Cài đặt.")
             clips.size < sentences.size -> {
                 Text("Câu ${clips.size + 1}/${sentences.size}. Bấm nút rồi đọc to, rõ ràng, ở chỗ yên tĩnh:")
@@ -220,6 +231,7 @@ fun ChatScreen(
     onBankSetup: () -> Unit,
     onInterview: () -> Unit,
     onPickModel: () -> Unit,
+    onModels: () -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
     val progress = vm.importProgress.value
@@ -239,7 +251,7 @@ fun ChatScreen(
             AssistChip(onClick = onVoiceSetup, label = { Text("🎙️ Giọng của tôi") })
             AssistChip(onClick = onBankSetup, label = { Text("🏦 Đọc biến động số dư") })
             AssistChip(onClick = onInterview, label = { Text("🎧 Phỏng vấn") })
-            AssistChip(onClick = { if (progress == null) onPickModel() }, label = { Text("🧠 Mô hình AI") })
+            AssistChip(onClick = onModels, label = { Text("🧠 Mô hình") })
         }
         if (!vm.modelReady.value || progress != null || vm.importNote.value.isNotEmpty()) {
             ModelCard(
@@ -357,8 +369,10 @@ fun InterviewScreen(onBack: () -> Unit) {
         Button(onClick = { scope.launch { saveProfile(); note = "Đã lưu hồ sơ (mã hoá trong máy)." } }) { Text("Lưu hồ sơ") }
 
         Text("Kiểm tra", style = MaterialTheme.typography.titleMedium)
-        Text((if (llmReady) "✅" else "❌") + " Mô hình AI (model.task)")
-        Text((if (asrReady) "✅" else "❌") + " Mô hình nghe tiếng Anh (thư mục asr-en, xem README)")
+        Text((if (llmReady) "✅" else "❌") + " Mô hình AI (model.task)" +
+            if (llmReady) "" else ": chọn ở nút 🧠 Mô hình trên màn hình chat")
+        Text((if (asrReady) "✅" else "❌") + " Mô hình nghe tiếng Anh")
+        if (!asrReady) AsrModelSection(onChanged = { check++ })
         Text((if (micOk) "✅" else "❌") + " Quyền dùng micro")
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text((if (overlayOk) "✅" else "❌") + " Quyền hiện trên ứng dụng khác", Modifier.weight(1f))

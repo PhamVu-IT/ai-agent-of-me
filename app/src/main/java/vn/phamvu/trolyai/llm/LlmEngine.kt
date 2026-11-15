@@ -35,7 +35,7 @@ class MediaPipeEngine(private val context: Context) : LlmEngine {
 
     private fun ensureLoaded(): LlmInference {
         llm?.let { return it }
-        require(hasModel()) { "Chưa có mô hình. Bấm \"🧠 Mô hình AI\" để chọn file .task trong máy, hoặc chép vào ${modelFile.absolutePath}" }
+        require(hasModel()) { "Chưa có mô hình. Bấm \"🧠 Mô hình\" để chọn file .task trong máy, hoặc chép vào ${modelFile.absolutePath}" }
         val opts = LlmInference.LlmInferenceOptions.builder()
             .setModelPath(modelFile.absolutePath)
             .setMaxTokens(4096) // tổng chữ vào + ra; đủ chỗ cho hồ sơ, quy tắc và trí nhớ

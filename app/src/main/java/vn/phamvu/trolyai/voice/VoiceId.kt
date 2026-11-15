@@ -7,12 +7,14 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.net.Uri
 import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractor
 import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractorConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import vn.phamvu.trolyai.data.AppDb
 import vn.phamvu.trolyai.data.VoiceProfile
+import vn.phamvu.trolyai.models.ModelFiles
 import java.io.File
 import kotlin.math.sqrt
 
@@ -22,8 +24,9 @@ import kotlin.math.sqrt
  * Hai đoạn cùng một người nói sẽ cho hai dãy số gần nhau (độ giống gần 1).
  *
  * Mô hình: tải file .onnx trong mục "speaker-recongition-models" ở GitHub releases của k2-fsa/sherpa-onnx
- * (gợi ý: 3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx), chép vào
- * /sdcard/Android/data/vn.phamvu.trolyai/files/speaker.onnx
+ * (gợi ý: 3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx), rồi chọn file đó ngay trong app
+ * (importModel, nút "Chọn file .onnx"). App chép nó thành
+ * /sdcard/Android/data/vn.phamvu.trolyai/files/speaker.onnx (vẫn có thể adb push vào đúng chỗ này).
  */
 class VoiceId(private val ctx: Context, private val db: AppDb) {
     private val modelFile get() = File(ctx.getExternalFilesDir(null), "speaker.onnx")
@@ -32,7 +35,22 @@ class VoiceId(private val ctx: Context, private val db: AppDb) {
     /** Ngưỡng giống nhau. Cao hơn thì khó bị giả hơn nhưng dễ từ chối nhầm chính bạn. */
     var threshold = 0.6f
 
-    fun modelReady() = modelFile.exists()
+    fun modelReady() = modelFile.exists() && modelFile.length() > 0
+    fun modelSizeMb() = modelFile.length() / 1_000_000
+
+    /** Chép file .onnx người dùng chọn thành speaker.onnx. Tên file gốc là gì cũng được. */
+    suspend fun importModel(uri: Uri) = withContext(Dispatchers.IO) {
+        val name = ModelFiles.name(ctx, uri)
+        val lower = name.lowercase()
+        require(name.isEmpty() || lower.endsWith(".onnx")) {
+            "\"$name\" không phải file .onnx. Hãy chọn file mô hình nhận giọng, ví dụ 3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx."
+        }
+        require(listOf("encoder", "decoder", "joiner").none { it in lower }) {
+            "\"$name\" là file của mô hình nghe tiếng Anh, không phải mô hình nhận giọng. Hãy chọn nó ở mục \"Nghe tiếng Anh\"."
+        }
+        ModelFiles.copy(ctx, uri, modelFile)
+        extractor = null // lần sau sẽ nạp mô hình mới
+    }
     fun micAllowed() = ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     suspend fun enrolled() = db.voice().get() != null
 

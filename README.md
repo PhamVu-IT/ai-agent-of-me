@@ -57,7 +57,7 @@ Tải từ Hugging Face, trang `litert-community` (cần đăng nhập và chấ
 2. Bật Developer options + USB debugging trên điện thoại, cắm cáp, bấm **Run**.
 3. Đưa mô hình vào app, chọn một trong hai cách:
    - **Chọn ngay trong app (dễ nhất):** tải file `.task` về điện thoại (thường nằm trong thư mục Download),
-     mở app, bấm **Chọn file mô hình** trên thẻ "Chưa có mô hình AI" (hoặc chip **🧠 Mô hình AI** để đổi
+     mở app, bấm **Chọn file mô hình** trên thẻ "Chưa có mô hình AI" (hoặc chip **🧠 Mô hình** để đổi
      mô hình khác) rồi chọn file. App chép file vào bộ nhớ riêng, hiện phần trăm tiến độ (file vài GB mất
      vài phút, cứ để app mở), sau đó tự nạp mô hình. Chép xong có thể xoá bản trong Download cho đỡ tốn chỗ.
      Cần trống khoảng bằng dung lượng file cộng thêm 200 MB.
@@ -67,11 +67,17 @@ Tải từ Hugging Face, trang `litert-community` (cần đăng nhập và chấ
      ```
    Chỉ dùng được file `.task` (hoặc `.bin` kiểu cũ) cho MediaPipe; file `.litertlm` chưa dùng được.
 4. Mô hình nhận giọng chủ máy: cũng ở trang releases trên, mục **speaker-recongition-models**, tải
-   `3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx` rồi:
+   `3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx` về điện thoại. Mở app, bấm chip **🧠 Mô hình**,
+   mục "Nhận giọng chủ máy" bấm **Chọn file .onnx** rồi chọn file vừa tải (tên gì cũng được, app tự lưu thành
+   `speaker.onnx`). Nút này cũng hiện ngay trong **🎙️ Giọng của tôi** nếu chưa có mô hình.
+   Sau đó bấm **🎙️ Giọng của tôi**, xác nhận vân tay, đọc 5 câu mẫu.
+   Vẫn dùng adb được nếu muốn:
    ```
    adb push 3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx /sdcard/Android/data/vn.phamvu.trolyai/files/speaker.onnx
    ```
-   Mở app, bấm **🎙️ Giọng của tôi**, xác nhận vân tay, đọc 5 câu mẫu.
+
+   > Vì sao phải chọn trong app: từ Android 11, trình quản lý file (kể cả My Files của Samsung) không còn
+   > chép được vào thư mục `Android/data`. Chip **🧠 Mô hình** liệt kê cả ba mô hình, có ✅ / ❌ cho biết cái nào đã sẵn sàng.
 5. Đọc biến động số dư: bấm **🏦 Đọc biến động số dư**, bật "Trợ lý AI" trong danh sách Truy cập thông báo.
 6. Để nhận giọng nói offline: Cài đặt → Google → Giọng nói → Nhận dạng giọng nói ngoại tuyến → tải Tiếng Việt.
 7. Để nhắc đúng phút trên Android 12+: Cài đặt → Ứng dụng → Trợ lý AI → cho phép **Báo thức và lời nhắc**.
@@ -135,11 +141,19 @@ Bấm **🎧 Phỏng vấn** trên màn hình chat.
 
 Cài đặt một lần:
 1. Tải mô hình nghe tiếng Anh: trang releases của k2-fsa/sherpa-onnx, mục **asr-models**, file
-   `sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2` (miễn phí). Giải nén rồi:
+   `sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2` (miễn phí) về điện thoại. Trong màn hình Phỏng vấn
+   (hoặc chip **🧠 Mô hình**), mục "Nghe tiếng Anh", chọn một trong ba cách:
+   - **Chọn file** rồi chọn thẳng file `.tar.bz2` vừa tải, không cần giải nén. App tự giải nén và chỉ giữ
+     những file cần (mất một hai phút, để app mở).
+   - **Chọn file** rồi giữ ngón tay để chọn nhiều file đã giải nén: `tokens.txt` và các file encoder / decoder / joiner `.onnx`.
+   - **Chọn thư mục** đã giải nén. Android không cho chọn thẳng thư mục Download gốc, nên hãy để mô hình trong
+     một thư mục con (ví dụ `Download/asr-en`).
+
+   Không cần đổi tên file; nếu có cả bản thường và bản `int8`, app chỉ chép bản `int8` (nhẹ, nhanh hơn).
+   Chọn thiếu file thì app báo còn thiếu phần nào để chọn thêm. Vẫn dùng adb được:
    ```
    adb push sherpa-onnx-streaming-zipformer-en-2023-06-26 /sdcard/Android/data/vn.phamvu.trolyai/files/asr-en
    ```
-   Không cần đổi tên file; app tự chọn bản `int8` nếu có.
 2. Trong màn hình Phỏng vấn: điền **Hồ sơ của bạn** (vị trí ứng tuyển, kinh nghiệm, dự án, điểm mạnh). Gợi ý chỉ dựa trên hồ sơ này, mô hình được dặn không bịa kinh nghiệm.
 3. Bấm **Cấp quyền** để cho phép hiện trên ứng dụng khác, rồi **Kiểm tra lại**.
 4. Nên đăng ký **🎙️ Giọng của tôi** để máy không coi câu bạn nói là câu hỏi.
