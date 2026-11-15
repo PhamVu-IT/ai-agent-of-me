@@ -20,12 +20,15 @@ class ModelPickers(
     val speaker: () -> Unit,
     val asrFiles: () -> Unit,
     val asrFolder: () -> Unit,
+    val viAsrFiles: () -> Unit,
+    val viAsrFolder: () -> Unit,
 )
 
-/** Một chỗ xem và chọn cả ba mô hình: AI (model.task), nhận giọng chủ máy, nghe tiếng Anh. */
+/** Một chỗ xem và chọn các mô hình: AI (model.task), nhận giọng chủ máy, nghe tiếng Việt, nghe tiếng Anh. */
 @Composable
 fun ModelsScreen(vm: ChatViewModel, pickers: ModelPickers, onBack: () -> Unit) {
-    val busy = vm.importProgress.value != null || vm.speakerBusy.value || vm.asrBusy.value
+    val busy = vm.importProgress.value != null || vm.speakerBusy.value || vm.asrBusy.value ||
+        vm.viAsrBusy.value
     val view = LocalView.current
     DisposableEffect(busy) {
         view.keepScreenOn = busy
@@ -51,6 +54,8 @@ fun ModelsScreen(vm: ChatViewModel, pickers: ModelPickers, onBack: () -> Unit) {
 
         HorizontalDivider()
         SpeakerModelSection(vm, pickers)
+        HorizontalDivider()
+        ViAsrModelSection(vm, pickers)
         HorizontalDivider()
         AsrModelSection(vm, pickers)
         Spacer(Modifier.height(8.dp))
@@ -82,23 +87,44 @@ fun SpeakerModelSection(vm: ChatViewModel, pickers: ModelPickers) {
  * các file lẻ, hoặc thư mục đã giải nén.
  */
 @Composable
-fun AsrModelSection(vm: ChatViewModel, pickers: ModelPickers) {
-    val missing = vm.asrMissing.value
-    val busy = vm.asrBusy.value
+fun AsrModelSection(vm: ChatViewModel, pickers: ModelPickers) = SherpaAsrSection(
+    title = "Nghe tiếng Anh (phỏng vấn)",
+    archive = "sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2",
+    missing = vm.asrMissing.value, busy = vm.asrBusy.value, note = vm.asrNote.value,
+    onFiles = pickers.asrFiles, onFolder = pickers.asrFolder,
+)
+
+/** Mô hình nghe tiếng Việt cho nút 🎤: chạy offline, không cần Google hay mạng. */
+@Composable
+fun ViAsrModelSection(vm: ChatViewModel, pickers: ModelPickers) = SherpaAsrSection(
+    title = "Nghe tiếng Việt offline (nút 🎤)",
+    archive = "sherpa-onnx-zipformer-vi-int8-2025-04-20.tar.bz2",
+    missing = vm.viAsrMissing.value, busy = vm.viAsrBusy.value, note = vm.viAsrNote.value,
+    onFiles = pickers.viAsrFiles, onFolder = pickers.viAsrFolder,
+    extra = "Có mô hình này thì nói được cả khi không có mạng, không cần app Google. " +
+        "Bản nhỏ hơn: sherpa-onnx-zipformer-vi-30M-int8-2026-02-09.tar.bz2.",
+)
+
+@Composable
+private fun SherpaAsrSection(
+    title: String, archive: String, missing: List<String>, busy: Boolean, note: String,
+    onFiles: () -> Unit, onFolder: () -> Unit, extra: String = "",
+) {
     val ready = missing.isEmpty()
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text((if (ready) "✅" else "❌") + " Nghe tiếng Anh (phỏng vấn)", style = MaterialTheme.typography.titleMedium)
+        Text((if (ready) "✅" else "❌") + " " + title, style = MaterialTheme.typography.titleMedium)
         Text(if (ready) "Đã có đủ tokens.txt, encoder, decoder, joiner." else
-            "Tải sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2 ở trang releases của k2-fsa/sherpa-onnx, " +
+            (if (extra.isNotEmpty()) "$extra\n" else "") +
+            "Tải $archive ở trang releases của k2-fsa/sherpa-onnx, " +
             "mục asr-models. Bấm \"Chọn file\" rồi chọn thẳng file .tar.bz2 đó, không cần giải nén. Hoặc chọn các file " +
             "tokens.txt, encoder, decoder, joiner (giữ ngón tay để chọn nhiều file), hoặc chọn thư mục đã giải nén." +
             (if (missing.size < 4) "\nCòn thiếu: ${missing.joinToString(", ")}." else ""),
             style = MaterialTheme.typography.bodySmall)
         if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(enabled = !busy, onClick = pickers.asrFiles) { Text("Chọn file") }
-            OutlinedButton(enabled = !busy, onClick = pickers.asrFolder) { Text("Chọn thư mục") }
+            Button(enabled = !busy, onClick = onFiles) { Text(if (ready) "Chọn file khác" else "Chọn file") }
+            OutlinedButton(enabled = !busy, onClick = onFolder) { Text("Chọn thư mục") }
         }
-        if (vm.asrNote.value.isNotEmpty()) Text(vm.asrNote.value)
+        if (note.isNotEmpty()) Text(note)
     }
 }

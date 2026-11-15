@@ -7,7 +7,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -39,6 +38,7 @@ import vn.phamvu.trolyai.models.ModelsScreen
 import vn.phamvu.trolyai.models.SpeakerModelSection
 import vn.phamvu.trolyai.security.BiometricAuthenticator
 import vn.phamvu.trolyai.security.VoiceThenBiometric
+import vn.phamvu.trolyai.voice.VietnameseSpeech
 import vn.phamvu.trolyai.voice.VoiceId
 import java.util.Locale
 
@@ -56,10 +56,11 @@ class MainActivity : FragmentActivity() {
     private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan" hoặc "mohinh"
     private val voicePrompt = mutableStateOf<String?>(null) // dòng chữ khi đang nghe để nhận giọng
 
-    // Nhận giọng nói (Android hỗ trợ offline nếu đã tải gói tiếng Việt trong Google app)
-    private val speech = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
-        r.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let(vm::send)
-    }
+    // Nghe tiếng Việt ngay trong app (ưu tiên mô hình offline), không mở hộp thoại "Voice search" của Google
+    private lateinit var speech: VietnameseSpeech
+    /** Dòng chữ khi đang nghe nút 🎤, hoặc lời báo lỗi kèm hướng dẫn. */
+    private val micPrompt = mutableStateOf<String?>(null)
+    private val micError = mutableStateOf(false)
     /** Mở app (nút nguồn 2 lần, nút nhanh, widget, cử chỉ trợ lý) là tự nghe luôn, sau khi mở khoá. */
     private var listenWhenReady = false
 
@@ -83,6 +84,14 @@ class MainActivity : FragmentActivity() {
         pickingFile = false
         tree?.let(vm::importAsrFolder)
     }
+    private val pickViAsrFiles = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        pickingFile = false
+        if (uris.isNotEmpty()) vm.importViAsrFiles(uris)
+    }
+    private val pickViAsrFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        pickingFile = false
+        tree?.let(vm::importViAsrFolder)
+    }
     /**
      * Đang mở trình chọn file: app tạm ẩn nhưng không được khoá lại, nếu không thì khi quay về sẽ hiện màn hình
      * khoá, mất màn hình đang mở và file vừa chọn không được lưu.
@@ -93,6 +102,8 @@ class MainActivity : FragmentActivity() {
         speaker = { pickingFile = true; pickSpeaker.launch(arrayOf("*/*")) },
         asrFiles = { pickingFile = true; pickAsrFiles.launch(arrayOf("*/*")) },
         asrFolder = { pickingFile = true; pickAsrFolder.launch(null) },
+        viAsrFiles = { pickingFile = true; pickViAsrFiles.launch(arrayOf("*/*")) },
+        viAsrFolder = { pickingFile = true; pickViAsrFolder.launch(null) },
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -107,6 +118,7 @@ class MainActivity : FragmentActivity() {
         tts = TextToSpeech(this) { tts?.language = Locale("vi", "VN") }
         auth = BiometricAuthenticator(this)
         voice = VoiceId(this, (application as App).db)
+        speech = VietnameseSpeech(this, lifecycleScope)
         vm.executor.auth = VoiceThenBiometric(voice, auth, voicePrompt)
 
         setContent {
@@ -118,7 +130,7 @@ class MainActivity : FragmentActivity() {
                         screen.value == "phongvan" -> InterviewScreen(vm, pickers, onBack = { screen.value = "chat" })
                         screen.value == "mohinh" -> ModelsScreen(vm, pickers, onBack = { screen.value = "chat" })
                         else -> ChatScreen(vm,
-                            onMic = ::listen,
+                            onMic = { listen(manual = true) },
                             onSpeak = { tts?.speak(it, TextToSpeech.QUEUE_FLUSH, null, "r") },
                             // Phải xác nhận vân tay trước, để người khác không đăng ký giọng của họ thay bạn
                             onVoiceSetup = { lifecycleScope.launch { if (auth.confirm("Đăng ký giọng chủ máy")) screen.value = "giong" } },
@@ -126,6 +138,23 @@ class MainActivity : FragmentActivity() {
                             onInterview = { screen.value = "phongvan" },
                             onPickModel = pickers.model,
                             onModels = { screen.value = "mohinh" })
+                    }
+                    micPrompt.value?.let { msg ->
+                        Dialog(onDismissRequest = ::stopListening) {
+                            Card {
+                                Column(Modifier.padding(24.dp).verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    Text(msg, style = if (micError.value) MaterialTheme.typography.bodyMedium
+                                        else MaterialTheme.typography.titleMedium)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        TextButton(onClick = ::stopListening) { Text(if (micError.value) "Đóng" else "Huỷ") }
+                                        if (micError.value) Button(onClick = { stopListening(); screen.value = "mohinh" }) {
+                                            Text("🧠 Chọn mô hình")
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     voicePrompt.value?.let { msg ->
                         Dialog(onDismissRequest = {}) {
@@ -153,18 +182,13 @@ class MainActivity : FragmentActivity() {
     private fun listenIfAsked() {
         if (!listenWhenReady || !unlocked.value || authenticating) return
         listenWhenReady = false
-        listen()
+        listen(manual = false)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString("screen", screen.value)
         outState.putBoolean("picking", pickingFile)
-    }
-
-    override fun onStop() {
-        super.onStop()
-        if (!authenticating && !pickingFile) backgroundSince = System.currentTimeMillis()
     }
 
     private fun unlock() {
@@ -180,13 +204,40 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private fun listen() {
-        speech.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "vi-VN")
-            .putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true))
+    /**
+     * Nghe một câu tiếng Việt rồi gửi cho trợ lý. [manual] là bấm nút 🎤; tự nghe lúc mở app ([manual] = false)
+     * thì không hiện lỗi nếu máy chưa nghe được, để mở app không bị bật hộp thoại.
+     */
+    private fun listen(manual: Boolean) {
+        if (!manual && (!speech.hasPermission() || !speech.isAvailable())) return
+        if (screen.value != "chat") return
+        tts?.stop() // không để trợ lý tự nghe tiếng mình đang đọc
+        micError.value = false
+        micPrompt.value = "🎤 Đang chuẩn bị…"
+        speech.start(object : VietnameseSpeech.Callback {
+            override fun onListening(text: String) { micError.value = false; micPrompt.value = text }
+            override fun onResult(text: String) { micPrompt.value = null; vm.send(text) }
+            override fun onEnd(message: String?) {
+                if (message == null || !manual) { micPrompt.value = null; return }
+                micError.value = true
+                micPrompt.value = message
+            }
+        })
     }
 
-    override fun onDestroy() { tts?.shutdown(); super.onDestroy() }
+    private fun stopListening() {
+        speech.stop()
+        micPrompt.value = null
+        micError.value = false
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (micPrompt.value != null && !micError.value) stopListening() // không nghe lén khi app ở nền
+        if (!authenticating && !pickingFile) backgroundSince = System.currentTimeMillis()
+    }
+
+    override fun onDestroy() { speech.stop(); speech.offline.release(); tts?.shutdown(); super.onDestroy() }
 }
 
 @Composable
