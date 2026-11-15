@@ -1,3 +1,5 @@
+import java.util.zip.ZipFile
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -67,7 +69,7 @@ dependencies {
 val kiemTraSherpaOnnx by tasks.registering {
     val libsDir = file("libs")
     doLast {
-        val aars = libsDir.listFiles(java.io.FileFilter { it.name.endsWith(".aar") }).orEmpty().toList()
+        val aars = libsDir.listFiles().orEmpty().filter { it.name.endsWith(".aar") }
         val huongDan = "Tải file sherpa-onnx-<phiên bản>.aar (bản Android thường, không phải .jar hay bản có chữ " +
             "\"rknn\"/\"qnn\"/\"ascend\") ở https://github.com/k2-fsa/sherpa-onnx/releases, đặt vào " +
             "${libsDir.absolutePath} rồi bấm Build > Clean Project và chạy lại."
@@ -75,7 +77,7 @@ val kiemTraSherpaOnnx by tasks.registering {
         if (aars.size > 1) throw GradleException(
             "Có ${aars.size} file .aar trong app/libs/ (${aars.joinToString { it.name }}). Chỉ giữ lại một file.")
         val aar = aars.single()
-        val entries = java.util.zip.ZipFile(aar).use { z -> z.entries().asSequence().map { it.name }.toSet() }
+        val entries = ZipFile(aar).use { z -> z.entries().asSequence().map { it.name }.toSet() }
         val canCo = "jni/arm64-v8a/libsherpa-onnx-jni.so"
         if (canCo !in entries) throw GradleException(
             "File ${aar.name} không có $canCo nên app sẽ báo lỗi thiếu thư viện khi lưu giọng. $huongDan")
