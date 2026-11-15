@@ -50,6 +50,9 @@ dependencies {
     implementation("net.zetetic:sqlcipher-android:4.6.1")
     implementation("androidx.sqlite:sqlite-ktx:2.4.0")
 
+    // Giải nén mô hình nghe tiếng Anh (.tar.bz2 tải từ sherpa-onnx) ngay trong app
+    implementation("org.apache.commons:commons-compress:1.27.1")
+
     // Nhận diện giọng chủ máy: tải sherpa-onnx-*.aar từ GitHub releases của k2-fsa/sherpa-onnx,
     // đổi tên thành sherpa-onnx.aar và đặt vào app/libs/ (mọi .aar/.jar trong libs/ đều được nạp)
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
