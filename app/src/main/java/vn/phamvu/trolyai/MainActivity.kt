@@ -274,7 +274,11 @@ fun ChatScreen(
     val list = rememberLazyListState()
     LaunchedEffect(vm.messages.size) {
         if (vm.messages.isNotEmpty()) list.animateScrollToItem(vm.messages.size - 1)
-        vm.messages.lastOrNull()?.takeIf { !it.fromUser }?.let { onSpeak(it.text) }
+    }
+    // Mỗi câu trả lời chỉ đọc một lần: đọc xong thì đánh dấu, tin cũ nạp lại khi mở app không được đọc
+    val speak = vm.toSpeak.value
+    LaunchedEffect(speak?.id) {
+        speak?.let { onSpeak(it.text); vm.markSpoken(it) }
     }
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(12.dp)) {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
