@@ -25,6 +25,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     val messages = mutableStateListOf<ChatMessage>()
     val thinking = mutableStateOf(false)
+    /** Phần câu trả lời AI đang viết dở, hiện dần trên màn hình; rỗng khi chưa có chữ nào. */
+    val partial = mutableStateOf("")
+    /** Dòng trạng thái dưới thanh tiến độ, ví dụ "Đang nạp mô hình…" hay "Đang suy nghĩ…". */
+    val status = mutableStateOf("")
 
     /**
      * Câu trả lời mới cần đọc to, null khi không có gì để đọc. Chỉ đặt khi trợ lý vừa trả lời trong lúc
@@ -141,6 +145,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     init {
+        // Nạp sẵn mô hình ngay khi mở app để câu hỏi đầu tiên không phải đợi nạp vài GB vào RAM
+        viewModelScope.launch {
+            if (!llm.hasModel() || llm.isLoaded()) return@launch
+            status.value = "Đang nạp mô hình AI vào bộ nhớ…"
+            try { llm.warmUp() } catch (e: CancellationException) { throw e } catch (e: Throwable) {
+                status.value = ""
+                add(ChatMessage(fromUser = false, text = "⚠️ Không nạp được mô hình AI: ${e.message ?: e.javaClass.simpleName}. " +
+                    "Câu đơn giản (ngày giờ, chào hỏi, khoản chi, nhắc nhở) mình vẫn trả lời được. Các câu khác cần chọn lại mô hình ở \"🧠 Mô hình\"."))
+                return@launch
+            }
+            if (!thinking.value) status.value = ""
+        }
         viewModelScope.launch {
             messages.addAll(db.chats().recent(50).reversed())
             // Lần đầu: trợ lý chủ động hỏi để làm quen
@@ -158,14 +174,27 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             add(ChatMessage(fromUser = true, text = text))
             thinking.value = true
+            partial.value = ""
+            status.value = if (llm.isLoaded() || !llm.hasModel()) "Đang suy nghĩ…" else "Đang nạp mô hình AI, lần đầu hơi lâu…"
             val reply = try {
-                val turn = assistant.handle(text)
+                val turn = assistant.handle(text) { p ->
+                    // Gọi từ luồng của mô hình; Compose state cho phép ghi từ luồng khác
+                    partial.value = p
+                    status.value = "Đang viết…"
+                }
                 val result = turn.action?.let { runCatching { executor.run(it) }.getOrElse { e -> "Không thực hiện được: ${e.message}" } }
                 listOf(turn.reply, result).filter { !it.isNullOrBlank() }.joinToString("\n")
-            } catch (e: Exception) {
-                "Lỗi: ${e.message}"
+                    .ifBlank { "Mình chưa nghĩ ra câu trả lời. Bạn nói lại theo cách khác giúp mình nhé." }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // Bắt cả lỗi nặng (thiếu RAM, lỗi thư viện) để không bao giờ im lặng
+                "⚠️ Lỗi: ${e.message ?: e.javaClass.simpleName}"
+            } finally {
+                thinking.value = false
+                partial.value = ""
+                status.value = ""
             }
-            thinking.value = false
             add(ChatMessage(fromUser = false, text = reply))
         }
     }

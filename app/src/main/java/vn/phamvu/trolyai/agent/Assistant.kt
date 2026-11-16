@@ -11,7 +11,10 @@ import java.util.*
 
 /** Một hành động trợ lý muốn thực hiện, do mô hình AI quyết định. */
 data class Action(val type: String, val args: JSONObject)
-data class AssistantTurn(val reply: String, val action: Action?)
+data class AssistantTurn(val reply: String, val action: Action?, val tier: Tier = Tier.LLM)
+
+/** Câu hỏi được trả lời ở tầng nào: đơn giản (tức thì), dữ liệu (đọc từ máy), hay cần AI suy nghĩ. */
+enum class Tier { QUICK, DATA, LLM }
 
 /**
  * "Bộ não": ghép lời nhắn + hồ sơ + quy tắc + trí nhớ + giờ hiện tại thành prompt,
@@ -21,22 +24,69 @@ class Assistant(private val llm: LlmEngine, private val db: AppDb) {
 
     private val fmt = SimpleDateFormat("EEEE yyyy-MM-dd'T'HH:mm", Locale("vi", "VN"))
     private val profile = Profile(db)
+    private val data = DataReply(db)
 
-    suspend fun handle(userText: String): AssistantTurn {
-        // Tin nhắn mới nhất đã được lưu trước khi gọi hàm này; bỏ nó khỏi lịch sử để không lặp
-        val history = db.chats().recent(9).drop(1).reversed()
-        val correction = profile.get(Profile.PENDING_CORRECTION)
-        if (correction != null) profile.put(Profile.PENDING_CORRECTION, "")
+    /**
+     * Bộ phân loại 3 tầng:
+     * 1. Câu đơn giản (ngày giờ, chào hỏi) trả lời ngay theo luật, không gọi AI.
+     * 2. Câu tra cứu (khoản chi, nhắc nhở, điều đã nhớ) đọc thẳng dữ liệu trong máy.
+     * 3. Còn lại mới gọi mô hình AI suy nghĩ; chữ hiện dần qua [onPartial] trong lúc AI đang viết.
+     * Đang có lời sửa (sau 👎) thì luôn để AI xử lý để nó ghi được bài học.
+     */
+    suspend fun handle(userText: String, onPartial: (String) -> Unit = {}): AssistantTurn {
+        val correction = profile.get(Profile.PENDING_CORRECTION)?.takeIf { it.isNotBlank() }
+        if (correction == null) {
+            val (self, you) = xungHo()
+            QuickReply.answer(userText, self, you)?.let { return AssistantTurn(it, null, Tier.QUICK) }
+            data.answer(userText, you)?.let { return AssistantTurn(it, null, Tier.DATA) }
+        } else {
+            profile.put(Profile.PENDING_CORRECTION, "")
+        }
+        // Tin nhắn mới nhất đã được lưu trước khi gọi hàm này; bỏ nó khỏi lịch sử để không lặp.
+        // Prompt càng ngắn AI càng trả lời nhanh, nên chỉ lấy 6 câu gần nhất.
+        val history = db.chats().recent(7).drop(1).reversed()
         val prompt = buildPrompt(
             user = userText,
             persona = persona(),
             rules = db.memories().ofKind("rule").map { it.content },
             memories = relevantMemories(userText),
             history = history,
-            money = Finance(db).summaryForPrompt(),
-            correction = correction?.takeIf { it.isNotBlank() },
+            money = if (aboutMoney(userText)) Finance(db).summaryForPrompt() else "(không liên quan câu này)",
+            correction = correction,
         )
-        return parse(llm.generate(prompt))
+        val raw = llm.generateStream(prompt) { partial -> partialReply(partial)?.let(onPartial) }
+        return parse(raw)
+    }
+
+    private suspend fun xungHo(): Pair<String, String> =
+        profile.xungHo().split("-").map { it.trim() }.let { it[0] to it.getOrElse(1) { "bạn" } }
+
+    /** Chỉ đưa sổ chi vào prompt khi câu hỏi nói về tiền, để prompt ngắn và AI chạy nhanh hơn. */
+    private fun aboutMoney(text: String): Boolean =
+        Regex("\\b(tien|tra|chi|no|luong|ngan hang|chuyen khoan|khoan|dong|trieu|nghin|k)\\b|\\d")
+            .containsMatchIn(Finance.normalize(text))
+
+    /**
+     * Lấy phần "reply" từ JSON AI đang viết dở để hiện dần lên màn hình.
+     * AI viết {"reply": "Chào bạn...  thì trả về "Chào bạn...". Chưa tới phần reply thì trả null.
+     */
+    private fun partialReply(raw: String): String? {
+        val trimmed = raw.trimStart().removePrefix("```json").removePrefix("```").trimStart()
+        if (!trimmed.startsWith("{")) return trimmed.takeIf { it.isNotBlank() }
+        val key = Regex("\"reply\"\\s*:\\s*\"").find(trimmed) ?: return null
+        val sb = StringBuilder()
+        var i = key.range.last + 1
+        while (i < trimmed.length) {
+            val c = trimmed[i]
+            if (c == '\\') {
+                if (i + 1 >= trimmed.length) break
+                when (val n = trimmed[i + 1]) { 'n' -> sb.append('\n'); 't' -> sb.append(' '); else -> sb.append(n) }
+                i += 2; continue
+            }
+            if (c == '"') break
+            sb.append(c); i++
+        }
+        return sb.toString().takeIf { it.isNotBlank() }
     }
 
     private suspend fun persona(): String {
@@ -67,8 +117,8 @@ Khi họ có điều phiền lòng nghiêm trọng về sức khoẻ hay an toà
             val fresh = if (now - m.createdAt < 7 * Finance.DAY) 0.5 else 0.0
             m.content to hits + fresh
         }
-        val top = scored.filter { it.second >= 1 }.sortedByDescending { it.second }.take(10).map { it.first }
-        val recent = all.take(5).map { it.content }
+        val top = scored.filter { it.second >= 1 }.sortedByDescending { it.second }.take(6).map { it.first }
+        val recent = all.take(3).map { it.content }
         return (top + recent).distinct()
     }
 
@@ -135,7 +185,8 @@ Lời nhắn mới: $user<end_of_turn>
             val a = obj.optJSONObject("action")
             AssistantTurn(obj.optString("reply", ""), a?.let { Action(it.optString("type"), it) })
         } catch (e: Exception) {
-            AssistantTurn(raw.trim(), null)
+            // JSON hỏng (thường do AI viết bị cắt): vẫn cứu được phần reply nếu có
+            AssistantTurn(partialReply(raw) ?: raw.trim(), null)
         }
     }
 }
