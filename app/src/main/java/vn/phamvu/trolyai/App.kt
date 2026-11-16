@@ -6,12 +6,12 @@ import android.app.NotificationManager
 import vn.phamvu.trolyai.data.AppDb
 import vn.phamvu.trolyai.finance.FinanceAlarms
 import vn.phamvu.trolyai.learn.LearnWorker
-import vn.phamvu.trolyai.llm.MediaPipeEngine
+import vn.phamvu.trolyai.llm.OfflineLlm
 
 class App : Application() {
     val db by lazy { AppDb.get(this) }
     /** Mô hình AI dùng chung cho chat, học ban đêm và chế độ phỏng vấn; tránh nạp hai lần tốn RAM. */
-    val llm by lazy { MediaPipeEngine(this) }
+    val llm by lazy { OfflineLlm(this) }
 
     override fun onCreate() {
         super.onCreate()

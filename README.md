@@ -10,7 +10,7 @@
      ▼
  ChatViewModel ──► Assistant ("bộ não")
                      │ 1. lấy trí nhớ liên quan + lịch sử chat từ Room
-                     │ 2. ghép prompt, gọi mô hình AI trên máy (MediaPipe)
+                     │ 2. ghép prompt, gọi mô hình AI trên máy (MediaPipe hoặc LiteRT-LM)
                      │ 3. mô hình trả JSON: {reply, action}
                      ▼
                  ActionExecutor
@@ -47,6 +47,12 @@ Máy của bạn (Galaxy S23 Ultra, Snapdragon 8 Gen 2, 8 hoặc 12 GB RAM): dù
 | 6 GB | Gemma 3n E2B (int4) | Khá tốt |
 | 4 GB | Gemma 3 1B (int4) | Hiểu được câu đơn giản |
 
+Ngoài file `.task`, app còn chạy được file **`.litertlm`** bằng thư viện LiteRT-LM, ví dụ
+[Gemma 4 E2B](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm) (khoảng 2,6 GB, trên GPU máy đời mới
+chữ đầu tiên ra sau chưa tới 1 giây). App tự chọn thư viện theo đuôi file: `.task` chạy bằng MediaPipe, `.litertlm`
+chạy bằng LiteRT-LM; cả hai đều thử GPU trước, lỗi thì tự chuyển sang CPU. Mỗi lúc chỉ giữ một mô hình: chọn file mới
+thì file cũ bị thay. Dòng ⏱ dưới câu trả lời cho biết đang chạy bằng thư viện nào, trên GPU hay CPU.
+
 Tải từ Hugging Face, trang `litert-community` (cần đăng nhập và chấp nhận điều khoản Gemma). Prompt hiện dùng định dạng hội thoại của Gemma (`<start_of_turn>`); nếu đổi sang dòng mô hình khác như Qwen thì sửa `buildPrompt` cho khớp.
 
 ## Cách chạy
@@ -60,7 +66,7 @@ Tải từ Hugging Face, trang `litert-community` (cần đăng nhập và chấ
    rồi mới **Run**, nếu không app có thể vẫn báo "library libsherpa-onnx-jni.so not found" lúc lưu giọng.
 2. Bật Developer options + USB debugging trên điện thoại, cắm cáp, bấm **Run**.
 3. Đưa mô hình vào app, chọn một trong hai cách:
-   - **Chọn ngay trong app (dễ nhất):** tải file `.task` về điện thoại (thường nằm trong thư mục Download),
+   - **Chọn ngay trong app (dễ nhất):** tải file `.task` hoặc `.litertlm` về điện thoại (thường nằm trong thư mục Download),
      mở app, bấm **Chọn file mô hình** trên thẻ "Chưa có mô hình AI" (hoặc chip **🧠 Mô hình** để đổi
      mô hình khác) rồi chọn file. App chép file vào bộ nhớ riêng, hiện phần trăm tiến độ (file vài GB mất
      vài phút, cứ để app mở), sau đó tự nạp mô hình. Chép xong có thể xoá bản trong Download cho đỡ tốn chỗ.
@@ -68,8 +74,11 @@ Tải từ Hugging Face, trang `litert-community` (cần đăng nhập và chấ
    - **Dùng cáp và adb:**
      ```
      adb push gemma-3n-E4B-it-int4.task /sdcard/Android/data/vn.phamvu.trolyai/files/model.task
+     # hoặc mô hình LiteRT-LM:
+     adb push gemma-4-E2B-it.litertlm /sdcard/Android/data/vn.phamvu.trolyai/files/model.litertlm
      ```
-   Chỉ dùng được file `.task` (hoặc `.bin` kiểu cũ) cho MediaPipe; file `.litertlm` chưa dùng được.
+   Nhận file `.task` (hoặc `.bin` kiểu cũ) cho MediaPipe và file `.litertlm` cho LiteRT-LM. Nếu dùng adb, chỉ để
+   một trong hai file `model.task` / `model.litertlm`; nếu có cả hai, app dùng file chép vào sau cùng.
 4. Mô hình nhận giọng chủ máy: cũng ở trang releases trên, mục **speaker-recongition-models**, tải
    `3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx` về điện thoại. Mở app, bấm chip **🧠 Mô hình**,
    mục "Nhận giọng chủ máy" bấm **Chọn file .onnx** rồi chọn file vừa tải (tên gì cũng được, app tự lưu thành

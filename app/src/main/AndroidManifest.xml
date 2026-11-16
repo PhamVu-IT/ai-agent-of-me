@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Nếu thư viện LiteRT-LM đòi Android mới hơn minSdk của app thì vẫn build được (máy S23/S26 đều đủ mới) -->
+    <uses-sdk tools:overrideLibrary="com.google.ai.edge.litertlm" />
 
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
@@ -26,6 +30,10 @@
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:theme="@android:style/Theme.Material.NoActionBar">
+
+        <!-- LiteRT-LM cần hai thư viện này của máy để chạy mô hình .litertlm trên GPU -->
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
 
         <activity android:name=".MainActivity" android:exported="true"
             android:launchMode="singleTask"

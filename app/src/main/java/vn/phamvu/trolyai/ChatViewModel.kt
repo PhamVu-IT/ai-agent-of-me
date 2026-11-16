@@ -53,7 +53,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun refreshModel() { modelReady.value = llm.hasModel() }
 
-    /** Chép file .task người dùng vừa chọn vào app rồi nạp luôn. Chạy tiếp khi xoay màn hình. */
+    /** Ví dụ "model.litertlm, 2584 MB, LiteRT-LM" để biết đang dùng mô hình nào. */
+    fun modelLabel(): String = "${llm.modelFile.name}, ${llm.modelSizeMb()} MB, ${llm.format.label}"
+
+    /** Chép file .task hoặc .litertlm người dùng vừa chọn vào app rồi nạp luôn. Chạy tiếp khi xoay màn hình. */
     fun importModel(uri: Uri) {
         if (importJob?.isActive == true) return
         importNote.value = ""
@@ -69,7 +72,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 "Đã huỷ chép mô hình."
             } catch (e: Throwable) {
                 if (llm.hasModel() && importLoading.value)
-                    "Đã chép file nhưng không nạp được mô hình: ${e.message}. Có thể file không đúng định dạng MediaPipe hoặc máy thiếu RAM; hãy chọn file khác."
+                    "Đã chép file nhưng không nạp được mô hình: ${e.message}. Có thể file hỏng, không đúng định dạng (.task cho MediaPipe, .litertlm cho LiteRT-LM) hoặc máy thiếu RAM; hãy chọn file khác."
                 else "Lỗi khi chép mô hình: ${e.message}"
             } finally {
                 importProgress.value = null

@@ -24,7 +24,7 @@ class ModelPickers(
     val viAsrFolder: () -> Unit,
 )
 
-/** Một chỗ xem và chọn các mô hình: AI (model.task), nhận giọng chủ máy, nghe tiếng Việt, nghe tiếng Anh. */
+/** Một chỗ xem và chọn các mô hình: AI (.task hoặc .litertlm), nhận giọng chủ máy, nghe tiếng Việt, nghe tiếng Anh. */
 @Composable
 fun ModelsScreen(vm: ChatViewModel, pickers: ModelPickers, onBack: () -> Unit) {
     val busy = vm.importProgress.value != null || vm.speakerBusy.value || vm.asrBusy.value ||
@@ -40,8 +40,11 @@ fun ModelsScreen(vm: ChatViewModel, pickers: ModelPickers, onBack: () -> Unit) {
         Text("Tải file về điện thoại (thường vào thư mục Download) rồi chọn ở đây. App chép file vào bộ nhớ " +
             "riêng của nó, chép xong có thể xoá bản trong Download.", style = MaterialTheme.typography.bodySmall)
 
-        Text((if (vm.modelReady.value) "✅" else "❌") + " Mô hình AI trò chuyện (.task)",
+        Text((if (vm.modelReady.value) "✅" else "❌") + " Mô hình AI trò chuyện (.task hoặc .litertlm)",
             style = MaterialTheme.typography.titleMedium)
+        Text(if (vm.modelReady.value) "Đang dùng: ${vm.modelLabel()}. Chọn file khác để đổi; file cũ sẽ bị thay."
+            else "File .task chạy bằng MediaPipe, file .litertlm (ví dụ Gemma 4 E2B) chạy bằng LiteRT-LM.",
+            style = MaterialTheme.typography.bodySmall)
         ModelCard(
             ready = vm.modelReady.value,
             progress = vm.importProgress.value,
