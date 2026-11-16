@@ -25,6 +25,7 @@ class Assistant(private val llm: LlmEngine, private val db: AppDb) {
     private val fmt = SimpleDateFormat("EEEE yyyy-MM-dd'T'HH:mm", Locale("vi", "VN"))
     private val profile = Profile(db)
     private val data = DataReply(db)
+    private val owner = OwnerReply(db)
 
     /**
      * Bộ phân loại 3 tầng:
@@ -34,6 +35,8 @@ class Assistant(private val llm: LlmEngine, private val db: AppDb) {
      * Đang có lời sửa (sau 👎) thì luôn để AI xử lý để nó ghi được bài học.
      */
     suspend fun handle(userText: String, onPartial: (String) -> Unit = {}): AssistantTurn {
+        // Tên, xưng hô, "tôi là ai": trả lời từ hồ sơ trên máy, luôn đúng và tức thì
+        owner.answer(userText)?.let { return AssistantTurn(it, null, Tier.DATA) }
         val correction = profile.get(Profile.PENDING_CORRECTION)?.takeIf { it.isNotBlank() }
         if (correction == null) {
             val (self, you) = xungHo()
@@ -94,8 +97,10 @@ class Assistant(private val llm: LlmEngine, private val db: AppDb) {
         val (self, you) = profile.xungHo().split("-").map { it.trim() }.let { it[0] to it.getOrElse(1) { "bạn" } }
         val name = profile.userName()
         val who = if (name == null) "người dùng (chưa biết tên, hãy hỏi tên và cách xưng hô khi thích hợp)" else name
+        val ownerLine = if (name == null) "" else
+            "\nNgười đang nhắn cho bạn chính là $name, chủ của chiếc điện thoại này. Nếu họ hỏi họ là ai, trả lời là $name."
         return """
-Bạn tên là $me, một người bạn thân của $who, sống trong điện thoại của họ.
+Bạn tên là $me, một người bạn thân của $who, sống trong điện thoại của họ.$ownerLine
 Xưng "$self", gọi họ là "$you". Nói chuyện tự nhiên như bạn bè: ấm áp, có chút hài hước, quan tâm thật lòng,
 hỏi han lại chuyện họ đã kể, chia vui khi họ vui, động viên khi họ mệt. Câu ngắn, không giảng bài.
 Thật thà: không biết thì nói không biết, không bịa. Bạn là AI và không giả vờ là người thật.

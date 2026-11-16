@@ -11,6 +11,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import vn.phamvu.trolyai.agent.ActionExecutor
 import vn.phamvu.trolyai.agent.Assistant
+import vn.phamvu.trolyai.agent.Tier
 import vn.phamvu.trolyai.data.ChatMessage
 import vn.phamvu.trolyai.interview.EnglishAsr
 import vn.phamvu.trolyai.voice.VietnameseAsr
@@ -29,6 +30,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val partial = mutableStateOf("")
     /** Dòng trạng thái dưới thanh tiến độ, ví dụ "Đang nạp mô hình…" hay "Đang suy nghĩ…". */
     val status = mutableStateOf("")
+    /** Dòng nhỏ cho biết câu vừa rồi mất bao lâu và trả lời bằng cách nào, để biết chậm ở đâu. */
+    val timing = mutableStateOf("")
 
     /**
      * Câu trả lời mới cần đọc to, null khi không có gì để đọc. Chỉ đặt khi trợ lý vừa trả lời trong lúc
@@ -169,18 +172,35 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun send(text: String) {
+    /** [voiceMs] là thời gian nghe và nhận dạng giọng nói (nếu nói bằng 🎤), để hiện trong dòng thời gian. */
+    fun send(text: String, voiceMs: Long = 0) {
         if (text.isBlank() || thinking.value) return
         viewModelScope.launch {
             add(ChatMessage(fromUser = true, text = text))
             thinking.value = true
             partial.value = ""
             status.value = if (llm.isLoaded() || !llm.hasModel()) "Đang suy nghĩ…" else "Đang nạp mô hình AI, lần đầu hơi lâu…"
+            timing.value = ""
+            val t0 = System.currentTimeMillis()
+            var firstMs = 0L
+            val wasLoaded = llm.isLoaded()
             val reply = try {
                 val turn = assistant.handle(text) { p ->
                     // Gọi từ luồng của mô hình; Compose state cho phép ghi từ luồng khác
+                    if (firstMs == 0L) firstMs = System.currentTimeMillis() - t0
                     partial.value = p
                     status.value = "Đang viết…"
+                }
+                val total = System.currentTimeMillis() - t0
+                val voice = if (voiceMs > 0) "🎤 nghe + nhận dạng ${sec(voiceMs)} · " else ""
+                timing.value = voice + when (turn.tier) {
+                    Tier.QUICK -> "⏱ ${sec(total)} · trả lời nhanh, không dùng AI"
+                    Tier.DATA -> "⏱ ${sec(total)} · đọc dữ liệu trong máy, không dùng AI"
+                    Tier.LLM -> buildString {
+                        append("⏱ ${sec(total)} · AI (${llm.backend}, mô hình ${llm.modelSizeMb()} MB)")
+                        if (!wasLoaded) append(" · nạp mô hình ${sec(llm.loadMs)}")
+                        if (firstMs > 0) append(" · chữ đầu sau ${sec(firstMs)}")
+                    }
                 }
                 val result = turn.action?.let { runCatching { executor.run(it) }.getOrElse { e -> "Không thực hiện được: ${e.message}" } }
                 listOf(turn.reply, result).filter { !it.isNullOrBlank() }.joinToString("\n")
@@ -211,6 +231,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    private fun sec(ms: Long) = "%.1f s".format(ms / 1000.0).replace('.', ',')
 
     private suspend fun add(m: ChatMessage) {
         val id = db.chats().insert(m)
