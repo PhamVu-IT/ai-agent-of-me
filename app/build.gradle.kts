@@ -25,11 +25,16 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    // LiteRT-LM và MediaPipe có thể cùng mang một thư viện C++; giữ một bản để không lỗi khi đóng gói
+    packaging { jniLibs { pickFirsts += "**/liblitertlm_jni.so" } }
 }
 
 dependencies {
     // Mô hình AI chạy hoàn toàn trên máy (MediaPipe LLM Inference)
     implementation("com.google.mediapipe:tasks-genai:0.10.24")
+    // Mô hình .litertlm (ví dụ Gemma 4 E2B) chạy bằng LiteRT-LM. Giữ bản 0.10.x vì đã chạy được Gemma 4 và
+    // hợp với Kotlin 2.0 của dự án. Bản 0.16 trở lên cần nâng Kotlin lên 2.2/2.3 trước.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.10.2")
 
     // Lưu trí nhớ, nhắc nhở, lịch sử chat
     implementation("androidx.room:room-runtime:2.6.1")

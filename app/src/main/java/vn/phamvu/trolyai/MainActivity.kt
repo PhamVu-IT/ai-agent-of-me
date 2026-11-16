@@ -66,8 +66,8 @@ class MainActivity : FragmentActivity() {
 
     private val askPermissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
 
-    // Chọn file mô hình (.task) từ bộ nhớ máy, thẻ nhớ hoặc Google Drive. File .task không có kiểu MIME
-    // riêng nên phải cho chọn mọi loại file, rồi kiểm tra đuôi sau.
+    // Chọn file mô hình (.task hoặc .litertlm) từ bộ nhớ máy, thẻ nhớ hoặc Google Drive. Hai loại file này
+    // không có kiểu MIME riêng nên phải cho chọn mọi loại file, rồi kiểm tra đuôi sau.
     private val pickModel = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         pickingFile = false
         uri?.let(vm::importModel)
@@ -414,7 +414,8 @@ fun ModelCard(
                     if (note.isNotEmpty()) Text(note)
                     if (!ready) {
                         Text("Chưa có mô hình AI", style = MaterialTheme.typography.titleMedium)
-                        Text("Chọn file mô hình đuôi .task bạn đã tải về máy (ví dụ gemma-3n-E4B-it-int4.task trong " +
+                        Text("Chọn file mô hình đuôi .task hoặc .litertlm bạn đã tải về máy (ví dụ gemma-3n-E4B-it-int4.task " +
+                            "hoặc gemma-4-E2B-it.litertlm trong " +
                             "thư mục Download). App sẽ chép file vào bộ nhớ riêng của nó, sau đó bạn có thể xoá bản trong Download.")
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -466,7 +467,7 @@ fun InterviewScreen(vm: ChatViewModel, pickers: ModelPickers, onBack: () -> Unit
         Button(onClick = { scope.launch { saveProfile(); note = "Đã lưu hồ sơ (mã hoá trong máy)." } }) { Text("Lưu hồ sơ") }
 
         Text("Kiểm tra", style = MaterialTheme.typography.titleMedium)
-        Text((if (llmReady) "✅" else "❌") + " Mô hình AI (model.task)" +
+        Text((if (llmReady) "✅" else "❌") + " Mô hình AI" +
             if (llmReady) "" else ": chọn ở nút 🧠 Mô hình trên màn hình chat")
         Text((if (asrReady) "✅" else "❌") + " Mô hình nghe tiếng Anh")
         if (!asrReady || vm.asrNote.value.isNotEmpty()) AsrModelSection(vm, pickers)
