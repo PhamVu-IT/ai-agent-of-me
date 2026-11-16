@@ -191,6 +191,23 @@ Giới hạn cần biết:
 - Mô hình và nhận giọng đều có thể nghe nhầm; dòng chữ xám phía trên cho biết máy đã nghe được gì.
 - Nhiều công ty không cho dùng công cụ trợ giúp trong lúc phỏng vấn; hãy xem quy định của họ.
 
+## Giao diện chat và tốc độ (học từ Google AI Edge Gallery)
+
+Màn hình chat làm theo kiểu [Google AI Edge Gallery](https://github.com/google-ai-edge/gallery):
+
+- Bong bóng tin nhắn có "đuôi", tên và hình tròn của trợ lý trên câu trả lời, màu theo hình nền máy (Android 12+), tự đổi sáng / tối.
+- Ba chấm "đang gõ…" trong lúc chờ chữ đầu tiên, rồi câu trả lời hiện dần từng chữ, màn hình tự bám theo dòng cuối.
+- Nút gửi thành nút dừng ■ khi trợ lý đang viết; dừng thì giữ phần đã viết.
+- Dưới mỗi câu trả lời: 👍 👎, 📋 chép, 🔊 đọc lại, và thời gian (tổng, chữ đầu, GPU/CPU). Giữ lâu bong bóng để chép.
+- Các nút Mô hình, Giọng của tôi, Đọc biến động số dư, Phỏng vấn nằm trong menu ⋮ trên cùng.
+
+Vì sao nhanh hơn: với mô hình `.litertlm`, app giữ một cuộc trò chuyện LiteRT-LM sống qua các lượt như Gallery.
+Mô hình đã đọc phần vai trò, quy tắc, hồ sơ một lần, mỗi lượt sau chỉ đọc lời nhắn mới, nên chữ đầu tiên ra sớm hơn
+nhiều. Cuộc trò chuyện tự làm mới (kèm 6 câu gần nhất) khi quy tắc / hồ sơ / tên thay đổi, khi sắp đầy 4096 token,
+hoặc sau khi bấm dừng. Mô hình `.task` (MediaPipe) vẫn chạy như cũ.
+
+File `ui/MessageBubbleShape.kt` lấy từ Gallery (Apache License 2.0, giữ nguyên ghi chú bản quyền của Google).
+
 ## Bảo mật
 
 - **Khoá app:** mở app phải xác nhận vân tay, khuôn mặt hoặc mã PIN của máy. Rời app quá 1 phút thì khoá lại.

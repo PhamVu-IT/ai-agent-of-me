@@ -1,0 +1,61 @@
+/*
+ * Copyright 2025 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Lấy từ Google AI Edge Gallery (https://github.com/google-ai-edge/gallery),
+ * file ui/common/chat/MessageBubbleShape.kt. Đã đổi package và thêm chú thích tiếng Việt.
+ */
+
+package vn.phamvu.trolyai.ui
+
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
+
+/**
+ * Bong bóng tin nhắn bo tròn ba góc, góc trên còn lại vuông (chỗ "đuôi" của bong bóng).
+ * [hardCornerAtLeftOrRight] = true: góc trên bên trái vuông (tin của trợ lý);
+ * false: góc trên bên phải vuông (tin của bạn).
+ */
+class MessageBubbleShape(
+    private val radius: Dp,
+    private val hardCornerAtLeftOrRight: Boolean = false,
+) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val radiusPx = with(density) { radius.toPx() }
+        val path = Path().apply {
+            addRoundRect(
+                RoundRect(
+                    left = 0f,
+                    top = 0f,
+                    right = size.width,
+                    bottom = size.height,
+                    topLeftCornerRadius =
+                        if (hardCornerAtLeftOrRight) CornerRadius(0f, 0f) else CornerRadius(radiusPx, radiusPx),
+                    topRightCornerRadius =
+                        if (hardCornerAtLeftOrRight) CornerRadius(radiusPx, radiusPx) else CornerRadius(0f, 0f),
+                    bottomLeftCornerRadius = CornerRadius(radiusPx, radiusPx),
+                    bottomRightCornerRadius = CornerRadius(radiusPx, radiusPx),
+                )
+            )
+        }
+        return Outline.Generic(path)
+    }
+}

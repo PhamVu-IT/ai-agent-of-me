@@ -38,6 +38,8 @@ import vn.phamvu.trolyai.models.ModelsScreen
 import vn.phamvu.trolyai.models.SpeakerModelSection
 import vn.phamvu.trolyai.security.BiometricAuthenticator
 import vn.phamvu.trolyai.security.VoiceThenBiometric
+import vn.phamvu.trolyai.ui.AppTheme
+import vn.phamvu.trolyai.ui.ChatScreen
 import vn.phamvu.trolyai.voice.VietnameseSpeech
 import vn.phamvu.trolyai.voice.VoiceId
 import java.util.Locale
@@ -122,7 +124,7 @@ class MainActivity : FragmentActivity() {
         vm.executor.auth = VoiceThenBiometric(voice, auth, voicePrompt)
 
         setContent {
-            MaterialTheme {
+            AppTheme {
                 Surface(Modifier.fillMaxSize()) {
                     when {
                         !unlocked.value -> LockedScreen(noLockSet = !auth.isAvailable(), onUnlock = ::unlock)
@@ -299,89 +301,6 @@ fun VoiceEnrollScreen(voice: VoiceId, vm: ChatViewModel, pickers: ModelPickers, 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { clips.clear(); status = "" }) { Text("Làm lại") }
             Button(onClick = onDone) { Text("Quay lại") }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ChatScreen(
-    vm: ChatViewModel,
-    onMic: () -> Unit,
-    onSpeak: (String) -> Unit,
-    onVoiceSetup: () -> Unit,
-    onBankSetup: () -> Unit,
-    onInterview: () -> Unit,
-    onPickModel: () -> Unit,
-    onModels: () -> Unit,
-) {
-    var input by remember { mutableStateOf("") }
-    val progress = vm.importProgress.value
-    // Chép file vài GB mất vài phút: giữ màn hình sáng để máy không ngủ giữa chừng
-    val view = LocalView.current
-    DisposableEffect(progress != null) {
-        view.keepScreenOn = progress != null
-        onDispose { view.keepScreenOn = false }
-    }
-    val list = rememberLazyListState()
-    LaunchedEffect(vm.messages.size) {
-        if (vm.messages.isNotEmpty()) list.animateScrollToItem(vm.messages.size - 1)
-    }
-    // Mỗi câu trả lời chỉ đọc một lần: đọc xong thì đánh dấu, tin cũ nạp lại khi mở app không được đọc
-    val speak = vm.toSpeak.value
-    LaunchedEffect(speak?.id) {
-        speak?.let { onSpeak(it.text); vm.markSpoken(it) }
-    }
-    Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(12.dp)) {
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AssistChip(onClick = onVoiceSetup, label = { Text("🎙️ Giọng của tôi") })
-            AssistChip(onClick = onBankSetup, label = { Text("🏦 Đọc biến động số dư") })
-            AssistChip(onClick = onInterview, label = { Text("🎧 Phỏng vấn") })
-            AssistChip(onClick = onModels, label = { Text("🧠 Mô hình") })
-        }
-        if (!vm.modelReady.value || progress != null || vm.importNote.value.isNotEmpty()) {
-            ModelCard(
-                ready = vm.modelReady.value,
-                progress = progress,
-                loading = vm.importLoading.value,
-                note = vm.importNote.value,
-                onPick = onPickModel,
-                onCancel = vm::cancelImport,
-                onDismiss = { vm.importNote.value = "" },
-            )
-        }
-        LazyColumn(Modifier.weight(1f), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(vm.messages) { m ->
-                Column(Modifier.fillMaxWidth(), horizontalAlignment = if (m.fromUser) Alignment.End else Alignment.Start) {
-                    Card(colors = CardDefaults.cardColors(
-                        containerColor = if (m.fromUser) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceVariant)) {
-                        Text(m.text, Modifier.padding(10.dp))
-                    }
-                    // Chấm câu trả lời để trợ lý học: 👎 rồi nói chỗ sai, trợ lý ghi thành quy tắc
-                    if (!m.fromUser && m.id > 0) Row {
-                        TextButton(onClick = { vm.rate(m, 1) }) { Text(if (m.rating > 0) "👍✓" else "👍") }
-                        TextButton(onClick = { vm.rate(m, -1) }) { Text(if (m.rating < 0) "👎✓" else "👎") }
-                    }
-                }
-            }
-        }
-        // Câu trả lời AI đang viết dở hiện dần, để không phải ngồi chờ màn hình trống
-        if (vm.partial.value.isNotBlank()) {
-            Card(Modifier.padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                Text(vm.partial.value + " ▍", Modifier.padding(10.dp))
-            }
-        }
-        if (vm.thinking.value || vm.status.value.isNotEmpty()) {
-            LinearProgressIndicator(Modifier.fillMaxWidth())
-            if (vm.status.value.isNotEmpty()) Text(vm.status.value, style = MaterialTheme.typography.bodySmall)
-        }
-        else if (vm.timing.value.isNotEmpty()) Text(vm.timing.value, style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(input, { input = it }, Modifier.weight(1f), placeholder = { Text("Nhắn cho trợ lý…") })
-            TextButton(onClick = onMic) { Text("🎤") }
-            Button(onClick = { vm.send(input); input = "" }) { Text("Gửi") }
         }
     }
 }

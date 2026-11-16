@@ -5,6 +5,7 @@ import vn.phamvu.trolyai.data.AppDb
 import vn.phamvu.trolyai.data.ChatMessage
 import vn.phamvu.trolyai.finance.Finance
 import vn.phamvu.trolyai.learn.Profile
+import vn.phamvu.trolyai.llm.ChatTurn
 import vn.phamvu.trolyai.llm.LlmEngine
 import java.text.SimpleDateFormat
 import java.util.*
@@ -46,18 +47,19 @@ class Assistant(private val llm: LlmEngine, private val db: AppDb) {
             profile.put(Profile.PENDING_CORRECTION, "")
         }
         // Tin nhắn mới nhất đã được lưu trước khi gọi hàm này; bỏ nó khỏi lịch sử để không lặp.
-        // Prompt càng ngắn AI càng trả lời nhanh, nên chỉ lấy 6 câu gần nhất.
-        val history = db.chats().recent(7).drop(1).reversed()
-        val prompt = buildPrompt(
-            user = userText,
-            persona = persona(),
-            rules = db.memories().ofKind("rule").map { it.content },
-            memories = relevantMemories(userText),
+        // Lịch sử chỉ dùng khi mô hình bắt đầu cuộc trò chuyện mới; các lượt sau mô hình tự nhớ.
+        val history = db.chats().recent(7).drop(1).reversed().map { it.fromUser to it.text }
+        val turn = ChatTurn(
+            system = systemPrompt(persona(), db.memories().ofKind("rule").map { it.content }),
             history = history,
-            money = if (aboutMoney(userText)) Finance(db).summaryForPrompt() else "(không liên quan câu này)",
-            correction = correction,
+            user = userTurn(
+                user = userText,
+                memories = relevantMemories(userText),
+                money = if (aboutMoney(userText)) Finance(db).summaryForPrompt() else null,
+                correction = correction,
+            ),
         )
-        val raw = llm.generateStream(prompt) { partial -> partialReply(partial)?.let(onPartial) }
+        val raw = llm.chat(turn) { partial -> partialReply(partial)?.let(onPartial) }
         return parse(raw)
     }
 
@@ -127,24 +129,15 @@ Khi họ có điều phiền lòng nghiêm trọng về sức khoẻ hay an toà
         return (top + recent).distinct()
     }
 
-    private suspend fun buildPrompt(
-        user: String, persona: String, rules: List<String>, memories: List<String>,
-        history: List<ChatMessage>, money: String, correction: String?,
-    ): String {
-        val now = fmt.format(Date())
+    /**
+     * Phần cố định của cuộc trò chuyện: vai trò, hồ sơ, quy tắc và cách trả lời. Không đưa giờ hay dữ liệu thay đổi
+     * từng câu vào đây, vì phần này đổi thì mô hình phải bắt đầu lại cuộc trò chuyện (chậm hơn).
+     */
+    private suspend fun systemPrompt(persona: String, rules: List<String>): String {
         val summary = profile.summary() ?: "(chưa có, sẽ tự hình thành sau vài ngày trò chuyện)"
         val ruleText = if (rules.isEmpty()) "(chưa có)" else rules.joinToString("\n") { "- $it" }
-        val mem = if (memories.isEmpty()) "(chưa có)" else memories.joinToString("\n") { "- $it" }
-        val hist = history.joinToString("\n") { (if (it.fromUser) "Họ: " else "Bạn: ") + it.text }
-        val fix = if (correction == null) "" else """
-
-LƯU Ý: họ vừa không hài lòng với câu trả lời này của bạn: "$correction".
-Lời nhắn mới có thể là lời sửa. Nếu đúng vậy, xin lỗi ngắn gọn, làm lại cho đúng,
-và ghi lại bài học bằng hành động learn_rule để lần sau không sai nữa."""
         return """
-<start_of_turn>user
 $persona
-Giờ hiện tại: $now.
 
 Hồ sơ về họ (bạn tự tóm tắt từ những lần trò chuyện trước):
 $summary
@@ -152,14 +145,8 @@ $summary
 Quy tắc họ đã dặn, LUÔN tuân theo:
 $ruleText
 
-Những điều liên quan bạn nhớ về họ:
-$mem
-
-Sổ chi định kỳ (dữ liệu thật, chỉ trả lời về tiền dựa trên phần này, không đoán):
-$money
-
-Hội thoại gần đây:
-$hist$fix
+Mỗi lời nhắn của họ kèm giờ hiện tại, điều bạn nhớ liên quan và (nếu cần) sổ chi định kỳ. Sổ chi là dữ liệu thật:
+chỉ trả lời về tiền dựa trên đó, không đoán.
 
 Chỉ trả lời bằng MỘT đối tượng JSON, không viết gì khác:
 {"reply": "câu trả lời", "action": null}
@@ -175,16 +162,31 @@ hoặc kèm một hành động:
 - Mở web/bản đồ: {"type":"open_url","url":"..."}
 - Thêm khoản chi cố định hằng tháng: {"type":"add_obligation","name":"Tiền nhà","day":5,"amount":5000000,"keywords":"tien nha,thue nha"}
 - Báo đã trả một khoản: {"type":"paid","name":"Tiền nhà","amount":5000000}
+""".trim()
+    }
 
-Lời nhắn mới: $user<end_of_turn>
-<start_of_turn>model
-""".trimIndent()
+    /** Lời nhắn của lượt này kèm dữ liệu chỉ dùng cho câu này. */
+    private fun userTurn(user: String, memories: List<String>, money: String?, correction: String?): String {
+        val now = fmt.format(Date())
+        val mem = if (memories.isEmpty()) "(chưa có)" else memories.joinToString("\n") { "- $it" }
+        return buildString {
+            append("Giờ hiện tại: $now.\n")
+            append("Điều bạn nhớ liên quan:\n$mem\n")
+            if (money != null) append("Sổ chi định kỳ:\n$money\n")
+            if (correction != null) append("""
+LƯU Ý: họ vừa không hài lòng với câu trả lời này của bạn: "$correction".
+Lời nhắn mới có thể là lời sửa. Nếu đúng vậy, xin lỗi ngắn gọn, làm lại cho đúng,
+và ghi lại bài học bằng hành động learn_rule để lần sau không sai nữa.
+""")
+            append("\nLời nhắn mới: $user")
+        }
     }
 
     private fun parse(raw: String): AssistantTurn {
         val start = raw.indexOf('{')
         val end = raw.lastIndexOf('}')
-        if (start < 0 || end <= start) return AssistantTurn(raw.trim(), null)
+        // Không có JSON trọn vẹn (ví dụ bấm dừng giữa chừng): lấy phần reply đã viết được
+        if (start < 0 || end <= start) return AssistantTurn(partialReply(raw) ?: raw.trim(), null)
         return try {
             val obj = JSONObject(raw.substring(start, end + 1))
             val a = obj.optJSONObject("action")
