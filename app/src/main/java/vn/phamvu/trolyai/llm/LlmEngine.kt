@@ -4,6 +4,9 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Conversation
+import com.google.ai.edge.litertlm.ConversationConfig
+import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
@@ -16,6 +19,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import org.json.JSONObject
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CountDownLatch
 import kotlin.coroutines.coroutineContext
 
@@ -26,6 +31,63 @@ interface LlmEngine {
     /** Như [generate] nhưng báo dần phần chữ đã sinh qua [onPartial] (toàn bộ chữ tính tới lúc đó). */
     suspend fun generateStream(prompt: String, onPartial: (String) -> Unit): String =
         generate(prompt).also(onPartial)
+
+    /**
+     * Một lượt chat. Mặc định ghép thành một prompt dài như trước; [OfflineLlm] với mô hình .litertlm thì giữ
+     * cuộc trò chuyện trong mô hình qua các lượt (giống Google AI Edge Gallery), chỉ gửi lời nhắn mới nên
+     * chữ đầu tiên hiện ra nhanh hơn nhiều.
+     */
+    suspend fun chat(turn: ChatTurn, onPartial: (String) -> Unit): String =
+        generateStream(turn.toGemmaPrompt(), onPartial)
+
+    /** Dừng câu trả lời đang sinh (nút ■). Phần chữ đã sinh vẫn được trả về. */
+    fun stop() {}
+
+    /** Số liệu của lượt chat gần nhất, cho màn 📊 Thống kê; null nếu chưa có. */
+    val lastStats: GenStats? get() = null
+}
+
+/**
+ * Số liệu một lượt sinh chữ, giống thanh số liệu của Google AI Edge Gallery.
+ * Thư viện gọi lại mỗi lần có một token mới, nên số lần gọi lại xấp xỉ số token đã sinh.
+ */
+data class GenStats(
+    /** Từ lúc mô hình bắt đầu đọc câu hỏi tới chữ đầu tiên (gồm thời gian đọc prompt). */
+    val ttftMs: Long,
+    /** Từ lúc mô hình bắt đầu tới khi xong. */
+    val totalMs: Long,
+    /** Số token đã sinh (ước lượng bằng số lần thư viện gọi lại). */
+    val tokens: Int,
+    /** Số ký tự mô hình phải đọc ở lượt này (chỉ lời nhắn mới nếu dùng lại cuộc trò chuyện). */
+    val promptChars: Int,
+    /** Lượt này mô hình phải bắt đầu cuộc trò chuyện mới (đọc lại cả phần system) hay dùng lại cuộc cũ. */
+    val freshChat: Boolean,
+    /** Ước lượng số ký tự đang nằm trong bộ nhớ ngữ cảnh của mô hình. */
+    val contextChars: Int,
+) {
+    /** Tốc độ sinh chữ (token/giây), không tính lúc đọc prompt. */
+    val decodeTps: Double get() {
+        val ms = totalMs - ttftMs
+        return if (tokens > 1 && ms > 0) (tokens - 1) * 1000.0 / ms else 0.0
+    }
+}
+
+/**
+ * Một lượt chat chia làm ba phần để mô hình giữ được cuộc trò chuyện:
+ * - [system]: vai trò, quy tắc, hồ sơ, cách trả lời JSON. Ít khi đổi; đổi thì bắt đầu cuộc trò chuyện mới.
+ * - [history]: vài câu gần đây (true = người dùng nói), chỉ dùng khi bắt đầu cuộc trò chuyện mới.
+ * - [user]: lời nhắn mới kèm dữ liệu riêng của lượt này (giờ, điều nhớ liên quan, sổ chi…).
+ */
+data class ChatTurn(val system: String, val history: List<Pair<Boolean, String>>, val user: String) {
+    /** Ghép tất cả thành một prompt khuôn Gemma, cho MediaPipe (.task) và các việc không cần nhớ hội thoại. */
+    fun toGemmaPrompt(): String {
+        val hist = history.joinToString("\n") { (fromUser, text) -> (if (fromUser) "Họ: " else "Bạn: ") + text }
+        return buildString {
+            append("<start_of_turn>user\n").append(system)
+            if (hist.isNotBlank()) append("\n\nHội thoại gần đây:\n").append(hist)
+            append("\n\n").append(user).append("<end_of_turn>\n<start_of_turn>model\n")
+        }
+    }
 }
 
 /** Hai loại file mô hình app chạy được. Đuôi file quyết định dùng thư viện nào. */
@@ -55,7 +117,8 @@ enum class ModelFormat(val ext: String, val label: String) {
  * Cũng có thể adb push vào đúng một trong hai chỗ trên.
  */
 class OfflineLlm(private val context: Context) : LlmEngine {
-    private var runner: Runner? = null
+    // @Volatile vì nút dừng đọc nó từ luồng giao diện trong lúc luồng khác đang sinh chữ
+    @Volatile private var runner: Runner? = null
     // Một mô hình chỉ chạy một câu một lúc; chat, học ban đêm và phỏng vấn dùng chung nên phải xếp hàng
     private val lock = Mutex()
 
@@ -107,6 +170,37 @@ class OfflineLlm(private val context: Context) : LlmEngine {
     override suspend fun generateStream(prompt: String, onPartial: (String) -> Unit): String = lock.withLock {
         withContext(Dispatchers.IO) { ensureLoaded().generate(prompt, onPartial) }
     }
+
+    /** Lượt chat: với .litertlm thì dùng lại cuộc trò chuyện đang giữ trong mô hình (xem [LiteRtLmRunner.chat]). */
+    override suspend fun chat(turn: ChatTurn, onPartial: (String) -> Unit): String = lock.withLock {
+        withContext(Dispatchers.IO) {
+            val r = ensureLoaded()
+            // Đo từ lúc có khoá (không tính lúc xếp hàng chờ việc khác), đếm số lần thư viện báo chữ mới
+            val t0 = System.currentTimeMillis()
+            var first = 0L
+            var chunks = 0
+            val out = r.chat(turn) { p ->
+                if (chunks++ == 0) first = System.currentTimeMillis() - t0
+                onPartial(p)
+            }
+            val fresh = r.lastChatFresh
+            lastStats = GenStats(
+                ttftMs = first,
+                totalMs = System.currentTimeMillis() - t0,
+                tokens = chunks,
+                promptChars = if (fresh) turn.toGemmaPrompt().length else turn.user.length,
+                freshChat = fresh,
+                contextChars = r.contextChars,
+            )
+            out
+        }
+    }
+
+    @Volatile override var lastStats: GenStats? = null
+        private set
+
+    /** Không chờ khoá: phải dừng được ngay cả khi luồng khác đang giữ khoá để sinh chữ. */
+    override fun stop() { runner?.stop() }
 
     /** Nạp sẵn mô hình vào RAM khi mở app, để câu hỏi đầu tiên không phải đợi nạp vài chục giây. */
     suspend fun warmUp() {
@@ -194,6 +288,18 @@ internal interface Runner : AutoCloseable {
 
     /** Sinh câu trả lời; nếu có [onPartial] thì báo dần cả đoạn đã sinh. Chạy chặn luồng, gọi từ Dispatchers.IO/Default. */
     fun generate(prompt: String, onPartial: ((String) -> Unit)?): String
+
+    /** Một lượt chat; mặc định không nhớ gì giữa các lượt, lịch sử nằm cả trong prompt. */
+    fun chat(turn: ChatTurn, onPartial: (String) -> Unit): String = generate(turn.toGemmaPrompt(), onPartial)
+
+    /** Dừng câu đang sinh, nếu thư viện cho phép. */
+    fun stop() {}
+
+    /** Lượt chat vừa rồi có phải bắt đầu cuộc trò chuyện mới không (MediaPipe: luôn đọc lại cả prompt). */
+    val lastChatFresh: Boolean get() = true
+
+    /** Ước lượng số ký tự đang nằm trong bộ nhớ ngữ cảnh (MediaPipe: không giữ gì giữa các lượt). */
+    val contextChars: Int get() = 0
 }
 
 /**
@@ -248,7 +354,7 @@ internal class MediaPipeRunner(context: Context, file: File) : Runner {
  * Mô hình .litertlm chạy bằng LiteRT-LM (ví dụ litert-community/gemma-4-E2B-it-litert-lm).
  * LiteRT-LM tự ghép khuôn hội thoại đúng cho từng mô hình (Gemma 3, Gemma 4…), nên ta bỏ các thẻ
  * <start_of_turn> mà prompt trong app đang viết sẵn cho Gemma 3, chỉ gửi phần lời của người dùng.
- * Mỗi câu hỏi dùng một Conversation mới, giống MediaPipe: không nhớ câu trước (lịch sử đã nằm trong prompt).
+ * Chat thì giữ một Conversation qua các lượt (xem [chat]); các việc khác dùng Conversation riêng mỗi lần.
  */
 internal class LiteRtLmRunner(context: Context, file: File) : Runner {
     private val engine: Engine
@@ -259,7 +365,7 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
             EngineConfig(
                 modelPath = file.absolutePath,
                 backend = b,
-                maxNumTokens = 4096, // giống bản MediaPipe
+                maxNumTokens = MAX_TOKENS, // giống bản MediaPipe
                 // Lưu bộ đệm nhân GPU đã dịch, lần mở app sau nạp nhanh hơn
                 cacheDir = context.cacheDir.path,
             )
@@ -271,12 +377,84 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
         backend = b
     }
 
-    override fun generate(prompt: String, onPartial: ((String) -> Unit)?): String {
-        val text = stripGemmaTurns(prompt)
-        engine.createConversation().use { conversation ->
-            val sb = StringBuilder()
-            val done = CountDownLatch(1)
-            var error: Throwable? = null
+    /** Cuộc trò chuyện chat đang giữ trong mô hình (bộ nhớ KV đã tính sẵn), cùng phần system đã dùng để tạo nó. */
+    @Volatile private var chatConv: Conversation? = null
+    private var chatSystem: String? = null
+    /** Ước lượng độ dài cuộc trò chuyện (ký tự) để làm mới trước khi tràn [MAX_TOKENS]. */
+    private var chatChars = 0
+    /** Cuộc trò chuyện đang sinh chữ, để nút dừng huỷ được. */
+    @Volatile private var active: Conversation? = null
+    @Volatile private var cancelled = false
+    override var lastChatFresh = true
+        private set
+    override val contextChars: Int get() = if (chatConv == null) 0 else (chatSystem?.length ?: 0) + chatChars
+
+    /** Câu một lần (học ban đêm, phỏng vấn): tạo cuộc trò chuyện riêng rồi bỏ, không đụng tới cuộc chat. */
+    override fun generate(prompt: String, onPartial: ((String) -> Unit)?): String =
+        engine.createConversation().use { run(it, stripGemmaTurns(prompt), onPartial) }
+
+    /**
+     * Cách Google AI Edge Gallery làm cho nhanh: giữ một Conversation sống qua các lượt. Mô hình đã "đọc" phần
+     * system và các câu trước rồi, nên mỗi lượt chỉ phải đọc lời nhắn mới thay vì cả prompt dài, chữ đầu ra nhanh hơn.
+     * Tạo cuộc trò chuyện mới (kèm vài câu gần đây làm lịch sử) khi: chưa có, phần system đổi (quy tắc, hồ sơ, tên…),
+     * sắp đầy bộ nhớ ngữ cảnh, hoặc lượt trước bị dừng / lỗi.
+     */
+    override fun chat(turn: ChatTurn, onPartial: (String) -> Unit): String {
+        val fresh = chatConv == null || chatSystem != turn.system ||
+            turn.system.length + chatChars + turn.user.length > CHAT_CHAR_BUDGET
+        if (fresh) newChat(turn)
+        lastChatFresh = fresh
+        return try {
+            val out = run(chatConv!!, turn.user, onPartial)
+            chatChars += turn.user.length + out.length
+            // Bị dừng giữa chừng: mô hình còn giữ nửa câu trả lời, lượt sau làm lại cho sạch
+            if (cancelled) dropChat()
+            out
+        } catch (e: Throwable) {
+            dropChat()
+            if (fresh || e is OutOfMemoryError) throw e
+            // Thường do cuộc trò chuyện cũ đã đầy: làm lại một lần với cuộc trò chuyện mới
+            newChat(turn)
+            lastChatFresh = true
+            run(chatConv!!, turn.user, onPartial).also { chatChars += turn.user.length + it.length }
+        }
+    }
+
+    private fun newChat(turn: ChatTurn) {
+        dropChat()
+        chatConv = engine.createConversation(
+            ConversationConfig(
+                systemInstruction = Contents.of(turn.system),
+                initialMessages = historyMessages(turn.history),
+            )
+        )
+        chatSystem = turn.system
+        chatChars = turn.history.sumOf { it.second.length }
+    }
+
+    private fun dropChat() {
+        chatConv?.let { runCatching { it.close() } }
+        chatConv = null
+        chatSystem = null
+        chatChars = 0
+    }
+
+    override fun stop() {
+        // Chỉ dừng câu chat; câu của chế độ phỏng vấn hay học ban đêm cứ để chạy tiếp
+        val c = active ?: return
+        if (c !== chatConv) return
+        cancelled = true
+        runCatching { c.cancelProcess() }
+    }
+
+    /** Sinh chữ trên [conversation], báo dần qua [onPartial]. Bị dừng thì trả phần đã sinh, không báo lỗi. */
+    private fun run(conversation: Conversation, text: String, onPartial: ((String) -> Unit)?): String {
+        val sb = StringBuilder()
+        val done = CountDownLatch(1)
+        var error: Throwable? = null
+        cancelled = false
+        active = conversation
+        try {
             conversation.sendMessageAsync(text, object : MessageCallback {
                 override fun onMessage(message: Message) {
                     // Mỗi lần nhận một khúc chữ mới
@@ -289,17 +467,52 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
                 override fun onDone() = done.countDown()
 
                 override fun onError(throwable: Throwable) {
-                    error = throwable
+                    // Bấm dừng: LiteRT-LM báo CancellationException, coi như xong với phần đã có
+                    if (throwable !is CancellationException) error = throwable
                     done.countDown()
                 }
             })
             done.await()
-            error?.let { throw it }
-            return synchronized(sb) { sb.toString() }
+        } finally {
+            active = null
         }
+        error?.let { throw it }
+        return synchronized(sb) { sb.toString() }
     }
 
-    override fun close() = engine.close()
+    override fun close() {
+        dropChat()
+        engine.close()
+    }
+
+    companion object {
+        const val MAX_TOKENS = 4096
+        /**
+         * Khoảng 4096 token. Tiếng Việt thường 2,5–3 ký tự một token; để dư chỗ cho câu trả lời
+         * nên làm mới cuộc trò chuyện khi tổng chữ vượt mức này.
+         */
+        const val CHAT_CHAR_BUDGET = 7000
+
+        /**
+         * Lịch sử cho cuộc trò chuyện mới. Khuôn chat của Gemma đòi lượt người dùng và lượt mô hình xen kẽ,
+         * bắt đầu bằng người dùng, nên bỏ các câu trợ lý nói trước và gộp các câu liền nhau cùng một người.
+         * Câu của trợ lý được bọc lại thành JSON như mô hình vẫn trả lời, để nó giữ đúng cách viết.
+         */
+        internal fun historyMessages(history: List<Pair<Boolean, String>>): List<Message> {
+            val merged = mutableListOf<Pair<Boolean, String>>()
+            for ((fromUser, text) in history.dropWhile { !it.first }) {
+                val last = merged.lastOrNull()
+                if (last != null && last.first == fromUser) merged[merged.size - 1] = fromUser to last.second + "\n" + text
+                else merged += fromUser to text
+            }
+            // Câu cuối phải là của mô hình, vì lượt kế tiếp là lời nhắn mới của người dùng
+            if (merged.lastOrNull()?.first == true) merged.removeAt(merged.size - 1)
+            return merged.map { (fromUser, text) ->
+                if (fromUser) Message.user(text)
+                else Message.model("{\"reply\": ${JSONObject.quote(text)}, \"action\": null}")
+            }
+        }
+    }
 }
 
 /**

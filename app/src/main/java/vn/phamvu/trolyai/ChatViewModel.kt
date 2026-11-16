@@ -17,6 +17,7 @@ import vn.phamvu.trolyai.interview.EnglishAsr
 import vn.phamvu.trolyai.voice.VietnameseAsr
 import vn.phamvu.trolyai.voice.VoiceId
 import vn.phamvu.trolyai.learn.Profile
+import vn.phamvu.trolyai.llm.GenStats
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val db = (app as App).db
@@ -30,8 +31,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val partial = mutableStateOf("")
     /** Dòng trạng thái dưới thanh tiến độ, ví dụ "Đang nạp mô hình…" hay "Đang suy nghĩ…". */
     val status = mutableStateOf("")
-    /** Dòng nhỏ cho biết câu vừa rồi mất bao lâu và trả lời bằng cách nào, để biết chậm ở đâu. */
-    val timing = mutableStateOf("")
+    /**
+     * Số liệu từng lượt trong lần mở app này (mới nhất ở đầu), cho màn 📊 Thống kê. Không hiện ở màn chat
+     * để màn chat gọn; cần xem thì mở màn thống kê.
+     */
+    val stats = mutableStateListOf<TurnStat>()
+    /** Tên trợ lý hiện trên đầu màn hình và trên bong bóng trả lời. */
+    val assistantName = mutableStateOf("Trợ lý")
+    /** Ví dụ "LiteRT-LM GPU", rỗng khi mô hình chưa nạp. */
+    val backendLabel = mutableStateOf("")
+    private var job: Job? = null
+    /** Tăng mỗi lượt; lượt đã bị dừng thì không được ghi đè trạng thái của lượt mới. */
+    @Volatile private var turnId = 0
 
     /**
      * Câu trả lời mới cần đọc to, null khi không có gì để đọc. Chỉ đặt khi trợ lý vừa trả lời trong lúc
@@ -67,6 +78,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     importProgress.value = p
                     if (p >= 1f) importLoading.value = true
                 }
+                backendLabel.value = llm.backend
                 "✅ Đã cài mô hình mới. Giờ bạn nhắn cho mình được rồi."
             } catch (e: CancellationException) {
                 "Đã huỷ chép mô hình."
@@ -161,8 +173,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     "Câu đơn giản (ngày giờ, chào hỏi, khoản chi, nhắc nhở) mình vẫn trả lời được. Các câu khác cần chọn lại mô hình ở \"🧠 Mô hình\"."))
                 return@launch
             }
+            backendLabel.value = llm.backend
             if (!thinking.value) status.value = ""
         }
+        viewModelScope.launch { assistantName.value = Profile(db).assistantName() }
         viewModelScope.launch {
             messages.addAll(db.chats().recent(50).reversed())
             // Lần đầu: trợ lý chủ động hỏi để làm quen
@@ -178,34 +192,40 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** [voiceMs] là thời gian nghe và nhận dạng giọng nói (nếu nói bằng 🎤), để hiện trong dòng thời gian. */
     fun send(text: String, voiceMs: Long = 0) {
         if (text.isBlank() || thinking.value) return
-        viewModelScope.launch {
-            add(ChatMessage(fromUser = true, text = text))
-            thinking.value = true
-            partial.value = ""
-            status.value = if (llm.isLoaded() || !llm.hasModel()) "Đang suy nghĩ…" else "Đang nạp mô hình AI, lần đầu hơi lâu…"
-            timing.value = ""
+        val myTurn = ++turnId
+        thinking.value = true
+        partial.value = ""
+        status.value = if (llm.isLoaded() || !llm.hasModel()) "" else "Đang nạp mô hình AI, lần đầu hơi lâu…"
+        job = viewModelScope.launch {
+            add(ChatMessage(fromUser = true, text = text.trim()))
             val t0 = System.currentTimeMillis()
             var firstMs = 0L
             val wasLoaded = llm.isLoaded()
+            var stat: TurnStat? = null
             val reply = try {
-                val turn = assistant.handle(text) { p ->
-                    // Gọi từ luồng của mô hình; Compose state cho phép ghi từ luồng khác
+                val turn = assistant.handle(text.trim()) { p ->
+                    // Gọi từ luồng của mô hình; Compose state cho phép ghi từ luồng khác.
+                    // Lượt đã bị dừng (MediaPipe vẫn chạy nốt ở nền) thì không vẽ lên màn hình nữa.
+                    if (myTurn != turnId) return@handle
                     if (firstMs == 0L) firstMs = System.currentTimeMillis() - t0
                     partial.value = p
-                    status.value = "Đang viết…"
+                    status.value = ""
                 }
                 val total = System.currentTimeMillis() - t0
-                val voice = if (voiceMs > 0) "🎤 nghe + nhận dạng ${sec(voiceMs)} · " else ""
-                timing.value = voice + when (turn.tier) {
-                    Tier.QUICK -> "⏱ ${sec(total)} · trả lời nhanh, không dùng AI"
-                    Tier.DATA -> "⏱ ${sec(total)} · đọc dữ liệu trong máy, không dùng AI"
-                    Tier.LLM -> buildString {
-                        append("⏱ ${sec(total)} · AI (${llm.backend}, mô hình ${llm.modelSizeMb()} MB)")
-                        if (!wasLoaded) append(" · nạp mô hình ${sec(llm.loadMs)}")
-                        if (firstMs > 0) append(" · chữ đầu sau ${sec(firstMs)}")
-                    }
-                }
+                stat = TurnStat(
+                    at = System.currentTimeMillis(),
+                    question = text.trim(),
+                    tier = turn.tier,
+                    totalMs = total,
+                    firstMs = firstMs,
+                    voiceMs = voiceMs,
+                    backend = if (turn.tier == Tier.LLM) llm.backend else "",
+                    loadMs = if (turn.tier == Tier.LLM && !wasLoaded) llm.loadMs else 0,
+                    gen = if (turn.tier == Tier.LLM) llm.lastStats else null,
+                )
                 val result = turn.action?.let { runCatching { executor.run(it) }.getOrElse { e -> "Không thực hiện được: ${e.message}" } }
+                // Hành động set_profile có thể vừa đổi tên trợ lý
+                if (turn.action?.type == "set_profile") assistantName.value = Profile(db).assistantName()
                 listOf(turn.reply, result).filter { !it.isNullOrBlank() }.joinToString("\n")
                     .ifBlank { "Mình chưa nghĩ ra câu trả lời. Bạn nói lại theo cách khác giúp mình nhé." }
             } catch (e: CancellationException) {
@@ -213,13 +233,35 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Throwable) {
                 // Bắt cả lỗi nặng (thiếu RAM, lỗi thư viện) để không bao giờ im lặng
                 "⚠️ Lỗi: ${e.message ?: e.javaClass.simpleName}"
-            } finally {
-                thinking.value = false
-                partial.value = ""
-                status.value = ""
             }
+            if (myTurn != turnId) return@launch
+            backendLabel.value = llm.backend
+            finishTurn()
+            stat?.let { stats.add(0, it); if (stats.size > 100) stats.removeAt(stats.size - 1) }
             add(ChatMessage(fromUser = false, text = reply))
         }
+    }
+
+    /**
+     * Nút ■: dừng câu trả lời đang viết, giữ lại phần đã viết như Gallery. Màn hình trả lại ô nhập ngay,
+     * không đợi mô hình dừng hẳn.
+     */
+    fun stop() {
+        if (!thinking.value) return
+        llm.stop()
+        val shown = partial.value
+        turnId++ // lượt cũ có chạy nốt cũng không ghi đè gì nữa
+        job?.cancel()
+        finishTurn()
+        viewModelScope.launch {
+            add(ChatMessage(fromUser = false, text = shown.ifBlank { "(Đã dừng)" }))
+        }
+    }
+
+    private fun finishTurn() {
+        thinking.value = false
+        partial.value = ""
+        status.value = ""
     }
 
     /** 👍 / 👎 một câu trả lời. 👎 thì tin nhắn kế tiếp của bạn được hiểu là lời sửa. */
@@ -235,7 +277,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun sec(ms: Long) = "%.1f s".format(ms / 1000.0).replace('.', ',')
+    /** Thông tin mô hình cho màn thống kê. */
+    fun modelInfo(): ModelInfo = ModelInfo(
+        file = if (llm.hasModel()) llm.modelFile.name else "",
+        sizeMb = llm.modelSizeMb(),
+        backend = llm.backend,
+        loadMs = llm.loadMs,
+        loaded = llm.isLoaded(),
+    )
 
     private suspend fun add(m: ChatMessage) {
         val id = db.chats().insert(m)
@@ -244,3 +293,20 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         if (!saved.fromUser) toSpeak.value = saved
     }
 }
+
+/** Một lượt hỏi đáp: trả lời ở tầng nào, mất bao lâu, và (nếu dùng AI) số liệu của mô hình. */
+data class TurnStat(
+    val at: Long,
+    val question: String,
+    val tier: Tier,
+    val totalMs: Long,
+    /** Từ lúc bấm gửi tới khi chữ đầu hiện lên (0 nếu không dùng AI). */
+    val firstMs: Long,
+    val voiceMs: Long,
+    val backend: String,
+    /** Thời gian nạp mô hình nếu lượt này phải nạp (0 nếu đã nạp sẵn). */
+    val loadMs: Long,
+    val gen: GenStats?,
+)
+
+data class ModelInfo(val file: String, val sizeMb: Long, val backend: String, val loadMs: Long, val loaded: Boolean)
