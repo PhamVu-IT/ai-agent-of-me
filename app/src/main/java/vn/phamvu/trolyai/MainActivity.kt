@@ -41,6 +41,8 @@ import vn.phamvu.trolyai.security.BiometricAuthenticator
 import vn.phamvu.trolyai.security.VoiceThenBiometric
 import vn.phamvu.trolyai.ui.AppTheme
 import vn.phamvu.trolyai.ui.ChatScreen
+import vn.phamvu.trolyai.scribe.ScribeScreen
+import vn.phamvu.trolyai.scribe.ScribeViewModel
 import vn.phamvu.trolyai.ui.SettingsScreen
 import vn.phamvu.trolyai.ui.SkillsScreen
 import vn.phamvu.trolyai.ui.StatsScreen
@@ -50,6 +52,8 @@ import java.util.Locale
 
 class MainActivity : FragmentActivity() {
     private val vm: ChatViewModel by viewModels()
+    /** Chỉ tạo khi mở màn 🎧 Chép lời. */
+    private val scribe: ScribeViewModel by viewModels()
     private var tts: TextToSpeech? = null
     /** Tên các giọng tiếng Việt có trong máy, cho màn ⚙️ Cài đặt. */
     private val ttsVoices = mutableStateOf<List<String>>(emptyList())
@@ -73,7 +77,7 @@ class MainActivity : FragmentActivity() {
     private var backgroundSince = 0L
     private var authenticating = false // màn hình nhập PIN làm app tạm ẩn, tránh hỏi lại hai lần
 
-    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh", "thongke", "skill" hoặc "caidat"
+    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh", "thongke", "skill", "caidat" hoặc "cheploi"
     private val voicePrompt = mutableStateOf<String?>(null) // dòng chữ khi đang nghe để nhận giọng
 
     // Nghe tiếng Việt ngay trong app (ưu tiên mô hình offline), không mở hộp thoại "Voice search" của Google
@@ -124,6 +128,10 @@ class MainActivity : FragmentActivity() {
     private val pickSkillFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
         pickingFile = false
         tree?.let(vm::importSkillFolder)
+    }
+    private val pickAudio = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        pickingFile = false
+        uri?.let(scribe::open)
     }
     private val takePhoto = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         pickingFile = false
@@ -197,6 +205,9 @@ class MainActivity : FragmentActivity() {
                         screen.value == "caidat" -> SettingsScreen(vm, ttsVoices.value,
                             onTestVoice = { speak("Xin chào, mình là trợ lý của bạn. Giọng đọc này nghe ổn không?") },
                             onBack = { screen.value = "chat" })
+                        screen.value == "cheploi" -> ScribeScreen(scribe,
+                            onPickFile = { pickingFile = true; pickAudio.launch(arrayOf("audio/*", "video/*")) },
+                            onBack = { screen.value = "chat" })
                         else -> ChatScreen(vm,
                             onMic = { listen(manual = true) },
                             onSpeak = ::speak,
@@ -209,6 +220,7 @@ class MainActivity : FragmentActivity() {
                             onStats = { screen.value = "thongke" },
                             onSkills = { screen.value = "skill" },
                             onSettings = { screen.value = "caidat" },
+                            onScribe = { screen.value = "cheploi" },
                             onPickImage = {
                                 pickingFile = true
                                 pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))

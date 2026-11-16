@@ -258,6 +258,20 @@ class OfflineLlm(private val context: Context) : LlmEngine {
     /** Không chờ khoá: phải dừng được ngay cả khi luồng khác đang giữ khoá để sinh chữ. */
     override fun stop() { runner?.stop() }
 
+    /**
+     * Cho màn 🎧 Chép lời: nạp mô hình (nếu chưa) rồi cho biết mô hình có nghe được âm thanh không.
+     * Ném lỗi nếu chưa có mô hình hoặc nạp hỏng.
+     */
+    suspend fun canListen(): Boolean = lock.withLock {
+        withContext(Dispatchers.IO) { ensureLoaded() }
+        supportsMedia
+    }
+
+    /** Nghe một đoạn âm thanh WAV và làm theo [prompt] (chép lời, dịch…), không đụng tới cuộc chat. */
+    suspend fun listen(wav: ByteArray, prompt: String, onPartial: ((String) -> Unit)? = null): String = lock.withLock {
+        withContext(Dispatchers.IO) { ensureLoaded().listen(wav, prompt, onPartial) }
+    }
+
     /** Nạp sẵn mô hình vào RAM khi mở app, để câu hỏi đầu tiên không phải đợi nạp vài chục giây. */
     suspend fun warmUp() {
         if (!hasModel() || runner != null) return
@@ -350,6 +364,10 @@ internal interface Runner : AutoCloseable {
         require(!turn.hasMedia) { ChatTurn.NO_MEDIA }
         return generate(turn.toGemmaPrompt(), onPartial)
     }
+
+    /** Nghe một đoạn âm thanh (WAV) và làm theo [prompt], ví dụ chép lời hay dịch. Chỉ mô hình nhận âm thanh mới làm được. */
+    fun listen(wav: ByteArray, prompt: String, onPartial: ((String) -> Unit)?): String =
+        throw IllegalStateException(ChatTurn.NO_MEDIA)
 
     /** Dừng câu đang sinh, nếu thư viện cho phép. */
     fun stop() {}
@@ -481,6 +499,18 @@ internal class LiteRtLmRunner(
     /** Câu một lần (học ban đêm, phỏng vấn): tạo cuộc trò chuyện riêng rồi bỏ, không đụng tới cuộc chat. */
     override fun generate(prompt: String, onPartial: ((String) -> Unit)?): String =
         engine.createConversation().use { run(it, Contents.of(stripGemmaTurns(prompt)), onPartial) }
+
+    /**
+     * Chép lời / dịch một đoạn âm thanh như Audio Scribe của Gallery: cuộc trò chuyện riêng, âm thanh trước rồi tới lời dặn.
+     * Chọn chữ chắc nhất ở mỗi bước (top-k 1) để bản chép sát lời nói, không "sáng tạo" thêm.
+     */
+    override fun listen(wav: ByteArray, prompt: String, onPartial: ((String) -> Unit)?): String {
+        require(media) { ChatTurn.NO_MEDIA }
+        val config = ConversationConfig(samplerConfig = SamplerConfig(topK = 1, topP = 1.0, temperature = 1.0))
+        return engine.createConversation(config).use {
+            run(it, Contents.of(listOf(Content.AudioBytes(wav), Content.Text(prompt))), onPartial)
+        }
+    }
 
     /**
      * Cách Google AI Edge Gallery làm cho nhanh: giữ một Conversation sống qua các lượt. Mô hình đã "đọc" phần

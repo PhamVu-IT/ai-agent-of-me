@@ -249,6 +249,16 @@ Mở ⋮ › ⚙️ Cài đặt (giống phần "Configs" của Google AI Edge G
 
 Mô hình `.task` (MediaPipe) chưa dùng được temperature / top-k / top-p và chế độ suy nghĩ; cần mô hình `.litertlm`.
 
+## 🎧 Chép lời ghi âm (như Audio Scribe của Gallery)
+
+Mở ⋮ › 🎧 Chép lời ghi âm, chọn file (mp3, m4a, ogg, wav… cả phần tiếng của video) hoặc thu âm tới 30 phút, rồi chọn:
+
+- **Chép lời** hoặc **Dịch** sang Việt / Anh / Trung / Nhật / Hàn.
+- **AI nghe**: mô hình Gemma 3n / Gemma 4 (.litertlm) nghe trực tiếp, hiểu nhiều thứ tiếng.
+- **Nhận dạng tiếng Việt**: bộ nhận dạng offline (cài ở 🧠 Mô hình), nhanh hơn, chỉ nghe tiếng Việt; muốn dịch thì AI dịch phần chữ.
+
+App cắt bản ghi thành từng đoạn khoảng 25 giây (cắt ở chỗ im nhất để khỏi đứt chữ), bản chép hiện dần kèm mốc thời gian, có nút chép và chia sẻ. Mọi thứ chạy trong máy.
+
 ## Bảo mật
 
 - **Khoá app:** mở app phải xác nhận vân tay, khuôn mặt hoặc mã PIN của máy. Rời app quá 1 phút thì khoá lại.
