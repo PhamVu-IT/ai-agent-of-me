@@ -46,6 +46,8 @@ import vn.phamvu.trolyai.models.ModelStoreViewModel
 import vn.phamvu.trolyai.photos.PhotoSearchScreen
 import vn.phamvu.trolyai.photos.PhotoSearchViewModel
 import vn.phamvu.trolyai.scribe.ScribeScreen
+import vn.phamvu.trolyai.teacher.LanguageTeacherScreen
+import vn.phamvu.trolyai.teacher.LanguageTeacherViewModel
 import vn.phamvu.trolyai.scribe.ScribeViewModel
 import vn.phamvu.trolyai.ui.SettingsScreen
 import vn.phamvu.trolyai.ui.SkillsScreen
@@ -62,6 +64,12 @@ class MainActivity : FragmentActivity() {
     private val store: ModelStoreViewModel by viewModels()
     /** Chỉ tạo khi mở màn 🖼️ Tìm ảnh. */
     private val photos: PhotoSearchViewModel by viewModels()
+    /** Chỉ tạo khi mở màn 📸 Học ngoại ngữ. */
+    private val teacher: LanguageTeacherViewModel by viewModels()
+    private val pickTeacherPhoto = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        pickingFile = false
+        uri?.let(teacher::load)
+    }
     private val askPhotoPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         photos.onPermission(ok)
     }
@@ -80,6 +88,18 @@ class MainActivity : FragmentActivity() {
         if (voice != null) t.voice = voice else t.language = Locale("vi", "VN")
         t.speak(text, TextToSpeech.QUEUE_FLUSH, null, "r")
     }
+
+    /** Đọc bằng giọng một ngôn ngữ khác (màn học ngoại ngữ); câu sau [speak] tự quay về giọng tiếng Việt. */
+    private fun speakIn(text: String, locale: Locale) {
+        val t = tts ?: return
+        t.setSpeechRate(0.9f) // chậm một chút cho dễ nghe khi học
+        t.setPitch(1f)
+        if (t.setLanguage(locale) < TextToSpeech.LANG_AVAILABLE) {
+            teacher.error.value = "Máy chưa có giọng đọc ${locale.displayLanguage}. Cài thêm trong Cài đặt Android › Chuyển văn bản thành giọng nói."
+            return
+        }
+        t.speak(text, TextToSpeech.QUEUE_FLUSH, null, "lang")
+    }
     private lateinit var auth: BiometricAuthenticator
     private lateinit var voice: VoiceId
 
@@ -88,7 +108,7 @@ class MainActivity : FragmentActivity() {
     private var backgroundSince = 0L
     private var authenticating = false // màn hình nhập PIN làm app tạm ẩn, tránh hỏi lại hai lần
 
-    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh", "thongke", "skill", "caidat", "cheploi", "taimohinh" hoặc "timanh"
+    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh", "thongke", "skill", "caidat", "cheploi", "taimohinh", "timanh" hoặc "ngoaingu"
     private val voicePrompt = mutableStateOf<String?>(null) // dòng chữ khi đang nghe để nhận giọng
 
     // Nghe tiếng Việt ngay trong app (ưu tiên mô hình offline), không mở hộp thoại "Voice search" của Google
@@ -147,7 +167,8 @@ class MainActivity : FragmentActivity() {
     private val takePhoto = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         pickingFile = false
         val uri = photoUri
-        if (ok && uri != null) vm.attachImages(listOf(uri))
+        // Ảnh chụp từ màn 📸 Học ngoại ngữ thì đưa cho màn đó, còn lại đính kèm vào chat
+        if (ok && uri != null) { if (screen.value == "ngoaingu") teacher.load(uri) else vm.attachImages(listOf(uri)) }
     }
 
     /** Ảnh chụp lưu tạm trong bộ nhớ đệm riêng của app, đưa cho app máy ảnh qua FileProvider. */
@@ -160,7 +181,8 @@ class MainActivity : FragmentActivity() {
         pickingFile = true
         try { takePhoto.launch(uri) } catch (e: Exception) {
             pickingFile = false
-            vm.mediaNote.value = "Máy không có app chụp ảnh."
+            if (screen.value == "ngoaingu") teacher.error.value = "Máy không có app chụp ảnh."
+            else vm.mediaNote.value = "Máy không có app chụp ảnh."
         }
     }
 
@@ -219,6 +241,14 @@ class MainActivity : FragmentActivity() {
                         screen.value == "caidat" -> SettingsScreen(vm, ttsVoices.value,
                             onTestVoice = { speak("Xin chào, mình là trợ lý của bạn. Giọng đọc này nghe ổn không?") },
                             onBack = { screen.value = "chat" })
+                        screen.value == "ngoaingu" -> LanguageTeacherScreen(teacher,
+                            onTakePhoto = ::launchCamera,
+                            onPickPhoto = {
+                                pickingFile = true
+                                pickTeacherPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                            onSpeak = ::speakIn,
+                            onBack = { screen.value = "chat" })
                         screen.value == "timanh" -> PhotoSearchScreen(photos,
                             onAskPermission = {
                                 askPhotoPermission.launch(if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES
@@ -242,6 +272,7 @@ class MainActivity : FragmentActivity() {
                             onSettings = { screen.value = "caidat" },
                             onScribe = { screen.value = "cheploi" },
                             onPhotos = { screen.value = "timanh" },
+                            onTeacher = { screen.value = "ngoaingu" },
                             onPickImage = {
                                 pickingFile = true
                                 pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))

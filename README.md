@@ -293,6 +293,17 @@ Mở ⋮ › 🖼️ Tìm ảnh, cho phép đọc ảnh rồi bấm **Bắt đ�
 
 Bật **Tự đọc ảnh mới khi đang sạc** thì mỗi ngày, lúc máy đang sạc và bạn không dùng, app đọc thêm tối đa 200 ảnh. Mô tả chỉ lưu trong bộ nhớ riêng của app. Ảnh không gửi đi đâu.
 
+## 📸 Học ngoại ngữ qua camera
+
+Mở ⋮ › 📸 Học ngoại ngữ, chọn ngôn ngữ (Anh, Trung, Nhật, Hàn, Pháp) rồi chụp hay chọn ảnh đồ vật quanh bạn. AI xem ảnh và dạy tối đa 5 thứ nổi bật nhất trong đó. Mỗi thứ có:
+
+- từ bằng ngôn ngữ đang học
+- phiên âm (IPA, pinyin, romaji…)
+- nghĩa tiếng Việt
+- một câu ví dụ kèm lời dịch
+
+Bấm 🔊 để nghe đọc bằng giọng của ngôn ngữ đó. Bấm ☆ để lưu vào 📒 Sổ từ, rồi dùng 🃏 Ôn từ: app hiện nghĩa tiếng Việt, bạn gõ lại từ. Cần mô hình xem được ảnh (Gemma 3n / Gemma 4 .litertlm). Muốn nghe đọc thì máy cần có giọng đọc của ngôn ngữ đó.
+
 ## Bảo mật
 
 - **Khoá app:** mở app phải xác nhận vân tay, khuôn mặt hoặc mã PIN của máy. Rời app quá 1 phút thì khoá lại.

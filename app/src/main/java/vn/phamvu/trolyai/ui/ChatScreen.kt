@@ -77,6 +77,7 @@ fun ChatScreen(
     onSettings: () -> Unit,
     onScribe: () -> Unit,
     onPhotos: () -> Unit,
+    onTeacher: () -> Unit,
     onPickImage: () -> Unit,
     onTakePhoto: () -> Unit,
 ) {
@@ -124,6 +125,7 @@ fun ChatScreen(
             onSettings = onSettings,
             onScribe = onScribe,
             onPhotos = onPhotos,
+            onTeacher = onTeacher,
         )
         if (!vm.modelReady.value || progress != null || vm.importNote.value.isNotEmpty()) {
             Box(Modifier.padding(horizontal = 12.dp)) {
@@ -225,6 +227,7 @@ private fun ChatTopBar(
     onSettings: () -> Unit,
     onScribe: () -> Unit,
     onPhotos: () -> Unit,
+    onTeacher: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
@@ -249,6 +252,7 @@ private fun ChatTopBar(
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text("📊 Thống kê") }, onClick = { menu = false; onStats() })
                     DropdownMenuItem(text = { Text("🖼️ Tìm ảnh") }, onClick = { menu = false; onPhotos() })
+                    DropdownMenuItem(text = { Text("📸 Học ngoại ngữ") }, onClick = { menu = false; onTeacher() })
                     DropdownMenuItem(text = { Text("🎧 Chép lời ghi âm") }, onClick = { menu = false; onScribe() })
                     DropdownMenuItem(text = { Text("🧩 Skill & MCP") }, onClick = { menu = false; onSkills() })
                     DropdownMenuItem(text = { Text("🧠 Mô hình") }, onClick = { menu = false; onModels() })
