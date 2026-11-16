@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import androidx.activity.compose.setContent
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
@@ -95,6 +96,34 @@ class MainActivity : FragmentActivity() {
         pickingFile = false
         tree?.let(vm::importViAsrFolder)
     }
+    // Ảnh gửi cho mô hình xem: chọn từ thư viện (không cần quyền đọc ảnh) hoặc chụp bằng app máy ảnh
+    private val pickImages = registerForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(vn.phamvu.trolyai.media.ChatMedia.MAX_IMAGES)
+    ) { uris ->
+        pickingFile = false
+        if (uris.isNotEmpty()) vm.attachImages(uris)
+    }
+    private var photoUri: Uri? = null
+    private val takePhoto = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        pickingFile = false
+        val uri = photoUri
+        if (ok && uri != null) vm.attachImages(listOf(uri))
+    }
+
+    /** Ảnh chụp lưu tạm trong bộ nhớ đệm riêng của app, đưa cho app máy ảnh qua FileProvider. */
+    private fun launchCamera() {
+        val dir = java.io.File(cacheDir, "camera").apply { mkdirs() }
+        val file = java.io.File(dir, "photo_${System.currentTimeMillis()}.jpg")
+        dir.listFiles()?.forEach { if (it != file) it.delete() } // chỉ giữ ảnh mới nhất
+        val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", file)
+        photoUri = uri
+        pickingFile = true
+        try { takePhoto.launch(uri) } catch (e: Exception) {
+            pickingFile = false
+            vm.mediaNote.value = "Máy không có app chụp ảnh."
+        }
+    }
+
     /**
      * Đang mở trình chọn file: app tạm ẩn nhưng không được khoá lại, nếu không thì khi quay về sẽ hiện màn hình
      * khoá, mất màn hình đang mở và file vừa chọn không được lưu.
@@ -114,6 +143,7 @@ class MainActivity : FragmentActivity() {
         listenWhenReady = savedInstanceState == null
         savedInstanceState?.getString("screen")?.let { screen.value = it }
         pickingFile = savedInstanceState?.getBoolean("picking") ?: false
+        photoUri = savedInstanceState?.getParcelable("photo") // bản cũ của hàm này vẫn chạy trên mọi Android
         val perms = mutableListOf(Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= 33) perms += Manifest.permission.POST_NOTIFICATIONS
         askPermissions.launch(perms.toTypedArray())
@@ -142,7 +172,12 @@ class MainActivity : FragmentActivity() {
                             onInterview = { screen.value = "phongvan" },
                             onPickModel = pickers.model,
                             onModels = { screen.value = "mohinh" },
-                            onStats = { screen.value = "thongke" })
+                            onStats = { screen.value = "thongke" },
+                            onPickImage = {
+                                pickingFile = true
+                                pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                            onTakePhoto = ::launchCamera)
                     }
                     micPrompt.value?.let { msg ->
                         Dialog(onDismissRequest = ::stopListening) {
@@ -194,6 +229,7 @@ class MainActivity : FragmentActivity() {
         super.onSaveInstanceState(outState)
         outState.putString("screen", screen.value)
         outState.putBoolean("picking", pickingFile)
+        photoUri?.let { outState.putParcelable("photo", it) }
     }
 
     private fun unlock() {

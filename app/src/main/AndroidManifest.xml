@@ -89,6 +89,14 @@
             </intent-filter>
         </service>
 
+        <!-- Đưa chỗ lưu ảnh tạm cho app máy ảnh khi bấm "📷 Chụp ảnh" -->
+        <provider android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        </provider>
+
         <service android:name=".interview.InterviewService"
             android:exported="false"
             android:foregroundServiceType="microphone" />

@@ -1,5 +1,6 @@
 package vn.phamvu.trolyai.ui
 
+import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
@@ -11,6 +12,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -29,6 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -46,6 +50,8 @@ import kotlinx.coroutines.launch
 import vn.phamvu.trolyai.ChatViewModel
 import vn.phamvu.trolyai.ModelCard
 import vn.phamvu.trolyai.data.ChatMessage
+import vn.phamvu.trolyai.media.ChatMedia
+import vn.phamvu.trolyai.media.MessageMedia
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -66,6 +72,8 @@ fun ChatScreen(
     onPickModel: () -> Unit,
     onModels: () -> Unit,
     onStats: () -> Unit,
+    onPickImage: () -> Unit,
+    onTakePhoto: () -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
     val progress = vm.importProgress.value
@@ -141,7 +149,7 @@ fun ChatScreen(
                     val m = reversed[i]
                     // Phần tử kế tiếp trong danh sách ngược là tin nhắn ngay trước tin này
                     val prev = reversed.getOrNull(i + 1)
-                    if (m.fromUser) UserMessage(m)
+                    if (m.fromUser) UserMessage(m, vm.media[m.id], onPlay = vm::play)
                     else AgentMessage(
                         m = m,
                         name = name,
@@ -159,11 +167,31 @@ fun ChatScreen(
         }
         // Gợi ý câu hỏi khi mới làm quen, như các mẫu câu của Gallery
         if (vm.messages.size <= 2 && input.isEmpty() && !thinking) Suggestions { vm.send(it) }
-        ChatInput(
+        if (vm.mediaNote.value.isNotEmpty()) Text(vm.mediaNote.value, Modifier.padding(horizontal = 16.dp),
+            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+        // Ảnh / ghi âm đã đính kèm, chờ gửi
+        val audio = vm.attachedAudio.value
+        if (vm.attachedImages.isNotEmpty() || audio != null) AttachmentRow(
+            images = vm.attachedImages,
+            audio = audio,
+            onRemoveImage = vm::removeImage,
+            onRemoveAudio = vm::removeAudio,
+            onPlay = vm::play,
+        )
+        if (vm.recording.value) RecordingPanel(
+            ms = vm.recordMs.longValue,
+            level = vm.recordLevel.floatValue,
+            onCancel = { vm.finishRecording(cancel = true) },
+            onDone = { vm.finishRecording(cancel = false) },
+        ) else ChatInput(
             value = input,
             onValueChange = { input = it },
             thinking = thinking,
+            hasAttachment = vm.attachedImages.isNotEmpty() || audio != null,
             onMic = onMic,
+            onPickImage = onPickImage,
+            onTakePhoto = onTakePhoto,
+            onRecord = vm::startRecording,
             onSend = { vm.send(input); input = "" },
             onStop = vm::stop,
         )
@@ -238,9 +266,20 @@ private fun SenderLabel(name: String) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun UserMessage(m: ChatMessage) {
+private fun UserMessage(m: ChatMessage, media: MessageMedia?, onPlay: (ByteArray) -> Unit) {
     val copy = rememberCopy()
-    Row(Modifier.fillMaxWidth().padding(start = 48.dp), horizontalArrangement = Arrangement.End) {
+    Column(Modifier.fillMaxWidth().padding(start = 48.dp), horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // Ảnh đã gửi (chỉ còn trong lần mở app này), xếp ngang như Gallery
+        if (media != null && media.images.isNotEmpty()) Row(
+            Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            media.images.forEach { bmp ->
+                Image(bmp.asImageBitmap(), null, Modifier.size(140.dp).clip(RoundedCornerShape(12.dp)),
+                    contentScale = ContentScale.Crop)
+            }
+        }
+        media?.audioPcm?.let { pcm -> AudioChip(pcm, onPlay = { onPlay(pcm) }) }
         Surface(
             shape = MessageBubbleShape(radius = 18.dp),
             color = MaterialTheme.colorScheme.primary,
@@ -251,6 +290,64 @@ private fun UserMessage(m: ChatMessage) {
         }
     }
 }
+
+/** Đoạn ghi âm: 🎙️ độ dài, bấm ▶ để nghe lại. */
+@Composable
+private fun AudioChip(pcm: ByteArray, onPlay: () -> Unit, onRemove: (() -> Unit)? = null) {
+    Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+        Row(Modifier.padding(start = 4.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            SmallAction("▶", onPlay)
+            Text("🎙️ ${clock(ChatMedia.durationMs(pcm))}", style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSecondaryContainer)
+            if (onRemove != null) SmallAction("✕", onRemove)
+        }
+    }
+}
+
+/** Hàng ảnh và ghi âm đính kèm trên ô nhập, mỗi thứ có nút ✕ để bỏ. */
+@Composable
+private fun AttachmentRow(
+    images: List<Bitmap>,
+    audio: ByteArray?,
+    onRemoveImage: (Int) -> Unit,
+    onRemoveAudio: () -> Unit,
+    onPlay: (ByteArray) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        images.forEachIndexed { i, bmp ->
+            Box {
+                Image(bmp.asImageBitmap(), null, Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)),
+                    contentScale = ContentScale.Crop)
+                Box(Modifier.align(Alignment.TopEnd).padding(2.dp).size(22.dp).clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.6f)).clickable { onRemoveImage(i) },
+                    contentAlignment = Alignment.Center) { Text("✕", color = Color.White, fontSize = 12.sp) }
+            }
+        }
+        if (audio != null) AudioChip(audio, onPlay = { onPlay(audio) }, onRemove = onRemoveAudio)
+    }
+}
+
+/** Đang thu âm để gửi cho mô hình: chấm đỏ, thời gian, thanh âm lượng, nút Huỷ / Xong. */
+@Composable
+private fun RecordingPanel(ms: Long, level: Float, onCancel: () -> Unit, onDone: () -> Unit) {
+    Surface(Modifier.fillMaxWidth().padding(8.dp), shape = RoundedCornerShape(28.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            val t = rememberInfiniteTransition(label = "rec")
+            val a by t.animateFloat(0.3f, 1f, infiniteRepeatable(tween(600), RepeatMode.Reverse), label = "dot")
+            Box(Modifier.size(12.dp).alpha(a).clip(CircleShape).background(Color(0xFFE53935)))
+            Spacer(Modifier.width(10.dp))
+            Text("${clock(ms)} / ${clock(ChatMedia.MAX_AUDIO_SEC * 1000L)}", style = MaterialTheme.typography.labelLarge)
+            Spacer(Modifier.width(12.dp))
+            LinearProgressIndicator(progress = { level.coerceIn(0f, 1f) }, modifier = Modifier.weight(1f))
+            TextButton(onClick = onCancel) { Text("Huỷ") }
+            Button(onClick = onDone) { Text("Xong") }
+        }
+    }
+}
+
+private fun clock(ms: Long): String = "%d:%02d".format(ms / 60_000, ms / 1000 % 60)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -356,21 +453,36 @@ private fun ChatInput(
     value: String,
     onValueChange: (String) -> Unit,
     thinking: Boolean,
+    hasAttachment: Boolean,
     onMic: () -> Unit,
+    onPickImage: () -> Unit,
+    onTakePhoto: () -> Unit,
+    onRecord: () -> Unit,
     onSend: () -> Unit,
     onStop: () -> Unit,
 ) {
+    var menu by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
         Surface(shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh,
             modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.Bottom) {
-                Box(Modifier.padding(4.dp).size(48.dp).clip(CircleShape).clickable(onClick = onMic),
-                    contentAlignment = Alignment.Center) { Text("🎤", fontSize = 20.sp) }
+                // Nút ＋ như Gallery: gửi ảnh hoặc ghi âm cho mô hình xem / nghe
+                Box(Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp)) {
+                    Box(Modifier.size(44.dp).clip(CircleShape).clickable(enabled = !thinking) { menu = true },
+                        contentAlignment = Alignment.Center) {
+                        Text("＋", fontSize = 22.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text("📷 Chụp ảnh") }, onClick = { menu = false; onTakePhoto() })
+                        DropdownMenuItem(text = { Text("🖼️ Chọn ảnh") }, onClick = { menu = false; onPickImage() })
+                        DropdownMenuItem(text = { Text("🎙️ Ghi âm gửi cho AI nghe") }, onClick = { menu = false; onRecord() })
+                    }
+                }
                 TextField(
                     value = value,
                     onValueChange = onValueChange,
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("Nhắn cho trợ lý…") },
+                    placeholder = { Text(if (hasAttachment) "Hỏi gì về ảnh / ghi âm…" else "Nhắn cho trợ lý…") },
                     maxLines = 5,
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent,
@@ -381,10 +493,13 @@ private fun ChatInput(
                         disabledIndicatorColor = Color.Transparent,
                     ),
                 )
+                // 🎤 là nói để gõ chữ (nghe tiếng Việt offline), khác với ghi âm gửi cho mô hình
+                Box(Modifier.padding(4.dp).size(44.dp).clip(CircleShape).clickable(onClick = onMic),
+                    contentAlignment = Alignment.Center) { Text("🎤", fontSize = 20.sp) }
             }
         }
         Spacer(Modifier.width(8.dp))
-        val canSend = value.isNotBlank()
+        val canSend = value.isNotBlank() || hasAttachment
         val bg = if (thinking || canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest
         val fg = if (thinking || canSend) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
         Box(
