@@ -5,6 +5,8 @@
     <!-- Nếu thư viện LiteRT-LM đòi Android mới hơn minSdk của app thì vẫn build được (máy S23/S26 đều đủ mới) -->
     <uses-sdk tools:overrideLibrary="com.google.ai.edge.litertlm" />
 
+    <!-- Chỉ dùng khi một skill (Wikipedia, bản đồ, QR…) hay máy chủ MCP bạn thêm vào cần mạng; chat thường vẫn offline -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />

@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import vn.phamvu.trolyai.ChatViewModel
 import vn.phamvu.trolyai.ModelCard
+import vn.phamvu.trolyai.agent.ToolOutput
 import vn.phamvu.trolyai.data.ChatMessage
 import vn.phamvu.trolyai.media.ChatMedia
 import vn.phamvu.trolyai.media.MessageMedia
@@ -72,6 +73,7 @@ fun ChatScreen(
     onPickModel: () -> Unit,
     onModels: () -> Unit,
     onStats: () -> Unit,
+    onSkills: () -> Unit,
     onPickImage: () -> Unit,
     onTakePhoto: () -> Unit,
 ) {
@@ -115,6 +117,7 @@ fun ChatScreen(
             onInterview = onInterview,
             onModels = onModels,
             onStats = onStats,
+            onSkills = onSkills,
         )
         if (!vm.modelReady.value || progress != null || vm.importNote.value.isNotEmpty()) {
             Box(Modifier.padding(horizontal = 12.dp)) {
@@ -154,6 +157,7 @@ fun ChatScreen(
                         m = m,
                         name = name,
                         showSender = prev == null || prev.fromUser,
+                        tools = vm.toolOutputs[m.id].orEmpty(),
                         onRate = { r -> vm.rate(m, r) },
                         onSpeak = { onSpeak(m.text) },
                     )
@@ -209,6 +213,7 @@ private fun ChatTopBar(
     onInterview: () -> Unit,
     onModels: () -> Unit,
     onStats: () -> Unit,
+    onSkills: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
@@ -232,6 +237,7 @@ private fun ChatTopBar(
                 TextButton(onClick = { menu = true }) { Text("⋮", fontSize = 20.sp) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text("📊 Thống kê") }, onClick = { menu = false; onStats() })
+                    DropdownMenuItem(text = { Text("🧩 Skill & MCP") }, onClick = { menu = false; onSkills() })
                     DropdownMenuItem(text = { Text("🧠 Mô hình") }, onClick = { menu = false; onModels() })
                     DropdownMenuItem(text = { Text("🎙️ Giọng của tôi") }, onClick = { menu = false; onVoiceSetup() })
                     DropdownMenuItem(text = { Text("🏦 Đọc biến động số dư") }, onClick = { menu = false; onBankSetup() })
@@ -289,6 +295,54 @@ private fun UserMessage(m: ChatMessage, media: MessageMedia?, onPlay: (ByteArray
                 color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.bodyLarge)
         }
     }
+}
+
+@Composable
+private fun ToolResults(tools: List<ToolOutput>) {
+    Column(Modifier.padding(bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            tools.map { it.label }.distinct().forEach { label ->
+                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.tertiaryContainer) {
+                    Text(label, Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                }
+            }
+        }
+        tools.forEach { t ->
+            t.imageBase64?.let { b64 ->
+                val bmp = remember(b64) { decodeBase64Image(b64) }
+                if (bmp != null) Image(bmp.asImageBitmap(), null,
+                    Modifier.size(220.dp).clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Fit)
+            }
+            t.webviewUrl?.let { url -> SkillWebView(url, t.webviewIframe, t.aspectRatio) }
+        }
+    }
+}
+
+private fun decodeBase64Image(b64: String): Bitmap? = runCatching {
+    val bytes = android.util.Base64.decode(b64.substringAfter("base64,"), android.util.Base64.DEFAULT)
+    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+}.getOrNull()
+
+/** Khung web nhỏ trong bong bóng chat (bản đồ, bảng của skill). [iframe] = true thì bọc trong iframe như Gallery. */
+@android.annotation.SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun SkillWebView(url: String, iframe: Boolean, aspectRatio: Float) {
+    androidx.compose.ui.viewinterop.AndroidView(
+        factory = { ctx ->
+            android.webkit.WebView(ctx).apply {
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.allowFileAccess = true
+                webViewClient = android.webkit.WebViewClient()
+                if (iframe) loadDataWithBaseURL("https://localhost/", "<html><body style='margin:0'>" +
+                    "<iframe src='${url.replace("'", "%27")}' style='border:0;width:100%;height:100vh' allowfullscreen></iframe>" +
+                    "</body></html>", "text/html", "utf-8", null)
+                else loadUrl(url)
+            }
+        },
+        modifier = Modifier.fillMaxWidth().aspectRatio(aspectRatio.coerceIn(0.5f, 3f)).clip(RoundedCornerShape(12.dp)),
+    )
 }
 
 /** Đoạn ghi âm: 🎙️ độ dài, bấm ▶ để nghe lại. */
@@ -355,12 +409,15 @@ private fun AgentMessage(
     m: ChatMessage,
     name: String,
     showSender: Boolean,
+    tools: List<ToolOutput>,
     onRate: (Int) -> Unit,
     onSpeak: () -> Unit,
 ) {
     val copy = rememberCopy()
     Column(Modifier.fillMaxWidth().padding(end = 32.dp)) {
         if (showSender) SenderLabel(name)
+        // Skill / công cụ đã dùng: nhãn nhỏ, ảnh (ví dụ mã QR) và khung web (ví dụ bản đồ), như Gallery
+        if (tools.isNotEmpty()) ToolResults(tools)
         AgentBubble(Modifier.combinedClickable(onClick = {}, onLongClick = { copy(m.text) })) {
             Text(richText(m.text), style = MaterialTheme.typography.bodyLarge)
         }

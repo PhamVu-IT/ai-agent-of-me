@@ -12,7 +12,13 @@ import java.util.*
 
 /** Một hành động trợ lý muốn thực hiện, do mô hình AI quyết định. */
 data class Action(val type: String, val args: JSONObject)
-data class AssistantTurn(val reply: String, val action: Action?, val tier: Tier = Tier.LLM)
+data class AssistantTurn(
+    val reply: String,
+    val action: Action?,
+    val tier: Tier = Tier.LLM,
+    /** Skill / công cụ MCP đã chạy trong lượt này (nhãn, ảnh, trang web để hiện cho người dùng). */
+    val tools: List<ToolOutput> = emptyList(),
+)
 
 /** Câu hỏi được trả lời ở tầng nào: đơn giản (tức thì), dữ liệu (đọc từ máy), hay cần AI suy nghĩ. */
 enum class Tier { QUICK, DATA, LLM }
@@ -21,7 +27,7 @@ enum class Tier { QUICK, DATA, LLM }
  * "Bộ não": ghép lời nhắn + hồ sơ + quy tắc + trí nhớ + giờ hiện tại thành prompt,
  * yêu cầu mô hình trả lời dạng JSON gồm câu trả lời và (nếu cần) một hành động.
  */
-class Assistant(private val llm: LlmEngine, private val db: AppDb) {
+class Assistant(private val llm: LlmEngine, private val db: AppDb, private val tools: AgentTools? = null) {
 
     private val fmt = SimpleDateFormat("EEEE yyyy-MM-dd'T'HH:mm", Locale("vi", "VN"))
     private val profile = Profile(db)
@@ -57,7 +63,7 @@ class Assistant(private val llm: LlmEngine, private val db: AppDb) {
         // Lịch sử chỉ dùng khi mô hình bắt đầu cuộc trò chuyện mới; các lượt sau mô hình tự nhớ.
         val history = db.chats().recent(7).drop(1).reversed().map { it.fromUser to it.text }
         val turn = ChatTurn(
-            system = systemPrompt(persona(), db.memories().ofKind("rule").map { it.content }),
+            system = systemPrompt(persona(), db.memories().ofKind("rule").map { it.content }) + (tools?.promptSection() ?: ""),
             history = history,
             user = userTurn(
                 user = userText,
@@ -70,8 +76,41 @@ class Assistant(private val llm: LlmEngine, private val db: AppDb) {
             images = images,
             audios = audios,
         )
-        val raw = llm.chat(turn) { partial -> partialReply(partial)?.let(onPartial) }
-        return parse(raw)
+        return agentLoop(turn, userText, onPartial)
+    }
+
+    /**
+     * Như Gallery: mô hình có thể gọi skill / công cụ MCP; app chạy rồi gửi kết quả lại, mô hình trả lời tiếp.
+     * Tối đa [MAX_STEPS] bước để không lặp mãi. Chữ mô hình viết ở các bước được nối lại để hiện dần.
+     */
+    private suspend fun agentLoop(first: ChatTurn, userText: String, onPartial: (String) -> Unit): AssistantTurn {
+        var turn = first
+        val shown = StringBuilder()
+        val used = mutableListOf<ToolOutput>()
+        repeat(MAX_STEPS) { step ->
+            val before = shown.toString()
+            val raw = llm.chat(turn) { partial -> partialReply(partial)?.let { onPartial(before + it) } }
+            val res = parse(raw)
+            val action = res.action
+            val toolBox = tools
+            if (action == null || toolBox == null || !toolBox.handles(action.type) || step == MAX_STEPS - 1) {
+                return AssistantTurn((before + res.reply).trim(), action?.takeIf { toolBox?.handles(it.type) != true },
+                    Tier.LLM, used)
+            }
+            if (res.reply.isNotBlank()) shown.append(res.reply.trim()).append("\n")
+            onPartial(shown.toString() + "⏳ Đang chạy ${action.args.optString("name").ifBlank {
+                action.args.optString("skill").ifBlank { action.args.optString("tool").ifBlank { action.type } } }}…")
+            val out = toolBox.run(action)
+            used += out
+            // Lượt kế tiếp: kết quả công cụ + nhắc lại câu hỏi (mô hình .task không nhớ lượt trước)
+            turn = ChatTurn(
+                system = first.system,
+                history = first.history,
+                user = "Kết quả của lệnh ${action.type} (${out.label}):\n${out.text}\n\n" +
+                    "Tiếp tục làm theo hướng dẫn nếu cần, hoặc trả lời câu hỏi ban đầu của họ: \"$userText\"",
+            )
+        }
+        return AssistantTurn(shown.toString().trim(), null, Tier.LLM, used)
     }
 
     private suspend fun xungHo(): Pair<String, String> =
@@ -250,6 +289,8 @@ và ghi lại bài học bằng hành động learn_rule để lần sau không 
     }
 
     private companion object {
+        const val MAX_STEPS = 4
+
         /** Dấu mở đầu dòng lệnh; nhận cả khi mô hình viết không dấu hay khác hoa thường. */
         val ACTION_MARK = Regex("\\[\\[\\s*L[ỆEệe]NH\\s*\\]\\]", RegexOption.IGNORE_CASE)
     }

@@ -222,6 +222,22 @@ Mô hình nào vẫn quen trả JSON kiểu cũ thì app vẫn hiểu.
 
 File `ui/MessageBubbleShape.kt` lấy từ Gallery (Apache License 2.0, giữ nguyên ghi chú bản quyền của Google).
 
+## Agent Skills và MCP (như Google AI Edge Gallery)
+
+Menu ⋮ → **🧩 Skill & MCP**. Trợ lý thấy tên và mô tả của các skill / công cụ đang bật; khi cần thì tự gọi,
+app chạy rồi đưa kết quả lại để trợ lý trả lời tiếp (tối đa 4 bước mỗi câu).
+
+- **Skill có sẵn** (lấy từ Gallery, Apache License 2.0, trong `app/src/main/assets/skills/`): tra Wikipedia
+  (`query-wikipedia`), bản đồ (`interactive-map`, hiện ngay trong chat), tạo mã QR (`qr-code`, hiện ảnh), gửi email
+  (`send-email`, mở app email để bạn tự bấm gửi).
+- **Thêm skill**: từ đường link tới thư mục skill (có `SKILL.md`), hoặc chọn thư mục skill trong máy. Định dạng giống hệt
+  Gallery: `SKILL.md` (phần đầu `name`, `description`) và tuỳ chọn `scripts/index.html` có hàm
+  `window.ai_edge_gallery_get_result(data, secret)`. Skill cần khoá bí mật (`require-secret: true`) thì nhập khoá ở màn này.
+- **Máy chủ MCP**: thêm link Streamable HTTP (thường kết thúc bằng `/mcp`), kèm một header xác thực nếu cần
+  (ví dụ `X-Goog-Api-Key`). App tự lấy danh sách công cụ; bật / tắt từng công cụ. Mô hình nhỏ chỉ có 4096 token,
+  nên chỉ bật những công cụ bạn cần.
+- App có quyền Internet nhưng chỉ dùng khi một skill hay máy chủ MCP cần; trò chuyện thường vẫn chạy offline.
+
 ## Bảo mật
 
 - **Khoá app:** mở app phải xác nhận vân tay, khuôn mặt hoặc mã PIN của máy. Rời app quá 1 phút thì khoá lại.

@@ -17,7 +17,11 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import vn.phamvu.trolyai.agent.ActionExecutor
+import vn.phamvu.trolyai.agent.AgentTools
 import vn.phamvu.trolyai.agent.Assistant
+import vn.phamvu.trolyai.agent.ToolOutput
+import vn.phamvu.trolyai.mcp.McpServer
+import vn.phamvu.trolyai.skills.Skill
 import vn.phamvu.trolyai.agent.Tier
 import vn.phamvu.trolyai.data.ChatMessage
 import vn.phamvu.trolyai.interview.EnglishAsr
@@ -31,7 +35,9 @@ import vn.phamvu.trolyai.media.MessageMedia
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val db = (app as App).db
     private val llm = (app as App).llm
-    private val assistant = Assistant(llm, db)
+    /** Agent Skills và máy chủ MCP (như Gallery), dùng chung cho chat và màn quản lý. */
+    val tools = AgentTools(app)
+    private val assistant = Assistant(llm, db, tools)
     val executor = ActionExecutor(app, db)
 
     val messages = mutableStateListOf<ChatMessage>()
@@ -62,6 +68,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private var recordCancelled = false
     /** Ảnh / ghi âm của các tin đã gửi trong lần mở app này, theo id tin nhắn, để hiện trong bong bóng. */
     val media = mutableStateMapOf<Long, MessageMedia>()
+    /** Skill / công cụ MCP đã chạy cho từng câu trả lời trong lần mở app này (ảnh QR, bản đồ…). */
+    val toolOutputs = mutableStateMapOf<Long, List<ToolOutput>>()
     private var player: AudioTrack? = null
     /** Báo lỗi ngắn khi chọn ảnh hay thu âm hỏng. */
     val mediaNote = mutableStateOf("")
@@ -312,6 +320,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             var firstMs = 0L
             val wasLoaded = llm.isLoaded()
             var stat: TurnStat? = null
+            var used: List<ToolOutput> = emptyList()
             val reply = try {
                 val turn = assistant.handle(text, jpegs, wavs) { p ->
                     // Gọi từ luồng của mô hình; Compose state cho phép ghi từ luồng khác.
@@ -321,6 +330,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     partial.value = p
                     status.value = ""
                 }
+                used = turn.tools
                 val total = System.currentTimeMillis() - t0
                 stat = TurnStat(
                     at = System.currentTimeMillis(),
@@ -348,7 +358,56 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             backendLabel.value = llm.backend
             finishTurn()
             stat?.let { stats.add(0, it); if (stats.size > 100) stats.removeAt(stats.size - 1) }
-            add(ChatMessage(fromUser = false, text = reply))
+            val saved = add(ChatMessage(fromUser = false, text = reply))
+            if (used.isNotEmpty()) toolOutputs[saved.id] = used
+        }
+    }
+
+    // ---- Màn 🧩 Skill & MCP ----
+    val skillList = mutableStateListOf<Skill>()
+    val mcpServers = mutableStateListOf<McpServer>()
+    val toolsBusy = mutableStateOf(false)
+    val toolsNote = mutableStateOf("")
+
+    fun refreshTools() {
+        viewModelScope.launch {
+            val list = withContext(Dispatchers.IO) { tools.skills.all() }
+            skillList.clear(); skillList.addAll(list)
+            mcpServers.clear(); mcpServers.addAll(tools.mcp.servers())
+        }
+    }
+
+    fun setSkillEnabled(name: String, on: Boolean) { tools.skills.setEnabled(name, on); refreshTools() }
+    fun setSkillSecret(name: String, value: String) { tools.skills.setSecret(name, value); toolsNote.value = "Đã lưu khoá cho $name." }
+    fun deleteSkill(s: Skill) { tools.skills.delete(s); refreshTools() }
+    fun addSkillFromUrl(url: String) = toolsJob { "✅ Đã thêm skill ${tools.skills.addFromUrl(url).name}." }
+    fun importSkillFolder(tree: Uri) = toolsJob { "✅ Đã thêm skill ${tools.skills.importFolder(tree).name}." }
+
+    fun connectMcp(server: McpServer) = toolsJob {
+        val s = tools.mcp.connect(server)
+        "✅ Đã kết nối ${s.label}: ${s.tools.size} công cụ."
+    }
+    fun removeMcp(url: String) { tools.mcp.remove(url); refreshTools() }
+    fun setMcpEnabled(url: String, on: Boolean) {
+        tools.mcp.servers().firstOrNull { it.url == url }?.let { tools.mcp.upsert(it.copy(enabled = on)) }
+        refreshTools()
+    }
+    fun setMcpToolEnabled(url: String, tool: String, on: Boolean) {
+        tools.mcp.servers().firstOrNull { it.url == url }?.let { s ->
+            tools.mcp.upsert(s.copy(tools = s.tools.map { if (it.name == tool) it.copy(enabled = on) else it }))
+        }
+        refreshTools()
+    }
+
+    private fun toolsJob(block: suspend () -> String) {
+        if (toolsBusy.value) return
+        toolsBusy.value = true
+        toolsNote.value = "Đang làm…"
+        viewModelScope.launch {
+            toolsNote.value = try { block() }
+            catch (e: CancellationException) { throw e }
+            catch (e: Throwable) { "Lỗi: ${e.message ?: e.javaClass.simpleName}" }
+            finally { toolsBusy.value = false; refreshTools() }
         }
     }
 

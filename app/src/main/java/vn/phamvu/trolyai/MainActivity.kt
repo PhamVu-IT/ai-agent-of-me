@@ -41,6 +41,7 @@ import vn.phamvu.trolyai.security.BiometricAuthenticator
 import vn.phamvu.trolyai.security.VoiceThenBiometric
 import vn.phamvu.trolyai.ui.AppTheme
 import vn.phamvu.trolyai.ui.ChatScreen
+import vn.phamvu.trolyai.ui.SkillsScreen
 import vn.phamvu.trolyai.ui.StatsScreen
 import vn.phamvu.trolyai.voice.VietnameseSpeech
 import vn.phamvu.trolyai.voice.VoiceId
@@ -57,7 +58,7 @@ class MainActivity : FragmentActivity() {
     private var backgroundSince = 0L
     private var authenticating = false // màn hình nhập PIN làm app tạm ẩn, tránh hỏi lại hai lần
 
-    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh" hoặc "thongke"
+    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh", "thongke" hoặc "skill"
     private val voicePrompt = mutableStateOf<String?>(null) // dòng chữ khi đang nghe để nhận giọng
 
     // Nghe tiếng Việt ngay trong app (ưu tiên mô hình offline), không mở hộp thoại "Voice search" của Google
@@ -104,6 +105,11 @@ class MainActivity : FragmentActivity() {
         if (uris.isNotEmpty()) vm.attachImages(uris)
     }
     private var photoUri: Uri? = null
+    // Chọn thư mục skill (có SKILL.md) trong máy, như "Import local skill" của Gallery
+    private val pickSkillFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        pickingFile = false
+        tree?.let(vm::importSkillFolder)
+    }
     private val takePhoto = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         pickingFile = false
         val uri = photoUri
@@ -163,6 +169,9 @@ class MainActivity : FragmentActivity() {
                         screen.value == "phongvan" -> InterviewScreen(vm, pickers, onBack = { screen.value = "chat" })
                         screen.value == "mohinh" -> ModelsScreen(vm, pickers, onBack = { screen.value = "chat" })
                         screen.value == "thongke" -> StatsScreen(vm, onBack = { screen.value = "chat" })
+                        screen.value == "skill" -> SkillsScreen(vm,
+                            onImportFolder = { pickingFile = true; pickSkillFolder.launch(null) },
+                            onBack = { screen.value = "chat" })
                         else -> ChatScreen(vm,
                             onMic = { listen(manual = true) },
                             onSpeak = { tts?.speak(it, TextToSpeech.QUEUE_FLUSH, null, "r") },
@@ -173,6 +182,7 @@ class MainActivity : FragmentActivity() {
                             onPickModel = pickers.model,
                             onModels = { screen.value = "mohinh" },
                             onStats = { screen.value = "thongke" },
+                            onSkills = { screen.value = "skill" },
                             onPickImage = {
                                 pickingFile = true
                                 pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
