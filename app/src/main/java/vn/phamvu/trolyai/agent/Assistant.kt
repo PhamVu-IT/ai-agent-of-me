@@ -3,6 +3,7 @@ package vn.phamvu.trolyai.agent
 import org.json.JSONObject
 import vn.phamvu.trolyai.data.AppDb
 import vn.phamvu.trolyai.data.ChatMessage
+import vn.phamvu.trolyai.device.QuickCommand
 import vn.phamvu.trolyai.finance.Finance
 import vn.phamvu.trolyai.learn.Profile
 import vn.phamvu.trolyai.llm.ChatTurn
@@ -27,7 +28,13 @@ enum class Tier { QUICK, DATA, LLM }
  * "Bộ não": ghép lời nhắn + hồ sơ + quy tắc + trí nhớ + giờ hiện tại thành prompt,
  * yêu cầu mô hình trả lời dạng JSON gồm câu trả lời và (nếu cần) một hành động.
  */
-class Assistant(private val llm: LlmEngine, private val db: AppDb, private val tools: AgentTools? = null) {
+class Assistant(
+    private val llm: LlmEngine,
+    private val db: AppDb,
+    private val tools: AgentTools? = null,
+    /** Cho biết trong máy có app tên đó không, để câu "mở …" ngắn được làm ngay không cần AI. */
+    private val hasApp: ((String) -> Boolean)? = null,
+) {
 
     private val fmt = SimpleDateFormat("EEEE yyyy-MM-dd'T'HH:mm", Locale("vi", "VN"))
     private val profile = Profile(db)
@@ -54,6 +61,8 @@ class Assistant(private val llm: LlmEngine, private val db: AppDb, private val t
         if (!media) owner.answer(userText)?.let { return AssistantTurn(it, null, Tier.DATA) }
         val correction = profile.get(Profile.PENDING_CORRECTION)?.takeIf { it.isNotBlank() }
         if (correction == null && !media) {
+            // Lệnh điều khiển máy ngắn ("bật đèn pin", "mở Zalo"): làm ngay, không chờ AI
+            hasApp?.let { QuickCommand.match(userText, it) }?.let { return AssistantTurn("", it, Tier.QUICK) }
             val (self, you) = xungHo()
             QuickReply.answer(userText, self, you)?.let { return AssistantTurn(it, null, Tier.QUICK) }
             data.answer(userText, you)?.let { return AssistantTurn(it, null, Tier.DATA) }
@@ -240,6 +249,15 @@ Các việc làm được:
 - Gọi điện:   {"type":"call","number":"..."}
 - Nhắn tin:   {"type":"sms","number":"...","body":"..."}
 - Mở web/bản đồ: {"type":"open_url","url":"..."}
+- Đèn pin: {"type":"torch","on":true}
+- Mở cài đặt (wifi, bluetooth, du lieu, am luong, vi tri, man hinh, pin, may bay, khong lam phien): {"type":"open_settings","page":"wifi"}
+- Mở app: {"type":"open_app","name":"Zalo"}
+- Hẹn giờ đếm ngược: {"type":"timer","seconds":300,"label":"..."}
+- Âm lượng (up, down, mute, unmute hoặc 0-100): {"type":"volume","level":"up"}
+- Mở máy ảnh: {"type":"camera"}
+- Thêm lịch: {"type":"calendar","title":"...","start":"yyyy-MM-ddTHH:mm","end":"yyyy-MM-ddTHH:mm","location":"..."}
+- Thêm danh bạ: {"type":"contact","name":"...","phone":"...","email":"..."}
+- Xem bản đồ: {"type":"map","query":"Hồ Gươm"}
 - Thêm khoản chi cố định hằng tháng: {"type":"add_obligation","name":"Tiền nhà","day":5,"amount":5000000,"keywords":"tien nha,thue nha"}
 - Báo đã trả một khoản: {"type":"paid","name":"Tiền nhà","amount":5000000}
 """.trim()

@@ -40,8 +40,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val llm = (app as App).llm
     /** Agent Skills và máy chủ MCP (như Gallery), dùng chung cho chat và màn quản lý. */
     val tools = AgentTools(app)
-    private val assistant = Assistant(llm, db, tools)
     val executor = ActionExecutor(app, db)
+    private val assistant = Assistant(llm, db, tools, hasApp = { executor.device.findApp(it) != null })
 
     val messages = mutableStateListOf<ChatMessage>()
     val thinking = mutableStateOf(false)

@@ -7,6 +7,7 @@ import android.provider.AlarmClock
 import vn.phamvu.trolyai.data.AppDb
 import vn.phamvu.trolyai.data.Memory
 import vn.phamvu.trolyai.data.Reminder
+import vn.phamvu.trolyai.device.MobileActions
 import vn.phamvu.trolyai.finance.Finance
 import vn.phamvu.trolyai.learn.Profile
 import vn.phamvu.trolyai.reminder.ReminderScheduler
@@ -19,6 +20,9 @@ class ActionExecutor(private val ctx: Context, private val db: AppDb) {
 
     /** Do MainActivity gắn vào. Chưa có thì mặc định từ chối mọi lệnh nhạy cảm. */
     var auth: Authenticator = Authenticator { false }
+
+    /** Điều khiển điện thoại: đèn pin, Wi‑Fi, mở app, hẹn giờ… (như Mobile Actions của Gallery). */
+    val device = MobileActions(ctx)
 
     /** Các lệnh phải xác nhận vân tay / khuôn mặt trước khi làm. */
     private val sensitive = mapOf(
@@ -86,6 +90,7 @@ class ActionExecutor(private val ctx: Context, private val db: AppDb) {
         "sms" -> launch(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + a.args.getString("number")))
             .putExtra("sms_body", a.args.optString("body")))
         "open_url" -> launch(Intent(Intent.ACTION_VIEW, Uri.parse(a.args.getString("url"))))
+        in device.types -> device.run(a.type, a.args)
         else -> ""
     }
 

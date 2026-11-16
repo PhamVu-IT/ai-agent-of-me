@@ -271,6 +271,20 @@ Vào ⋮ › 🧠 Mô hình › **📥 Tải mô hình AI và đo tốc độ**:
   3. Dán mã vào app. Mã chỉ lưu trong máy.
 - **📏 Đo tốc độ**: mô hình đang dùng tóm tắt một đoạn văn cố định 3 lần. Kết quả cho biết tốc độ viết (token/giây), thời gian tới chữ đầu tiên, tốc độ đọc đề và thời gian nạp. Đổi GPU / CPU ở ⚙️ Cài đặt rồi đo lại để so sánh.
 
+## 📱 Điều khiển điện thoại bằng lời (như Mobile Actions của Gallery)
+
+Nói hoặc gõ vào chat, ví dụ:
+
+- "Bật đèn pin" hoặc "tắt đèn pin"
+- "Mở Wi‑Fi", "mở Bluetooth", "mở cài đặt vị trí"
+- "Mở Zalo", "mở máy tính"
+- "Hẹn giờ 5 phút", "tăng âm lượng", "tắt tiếng", "mở camera"
+- "Thêm lịch họp 9 giờ sáng mai", "lưu số 0912… tên anh Nam", "chỉ đường tới Hồ Gươm"
+
+Câu ngắn hay gặp được làm ngay mà không cần chờ AI. Cách này chạy được cả khi chưa có mô hình. Câu dài hơn thì AI hiểu ý rồi gọi cùng các lệnh đó.
+
+Android không cho app tự bật Wi‑Fi hay chỉnh độ sáng. Với những việc này, app mở đúng bảng cài đặt để bạn bấm một lần. Lịch và danh bạ được mở sẵn thông tin để bạn xem lại rồi tự bấm Lưu.
+
 ## Bảo mật
 
 - **Khoá app:** mở app phải xác nhận vân tay, khuôn mặt hoặc mã PIN của máy. Rời app quá 1 phút thì khoá lại.

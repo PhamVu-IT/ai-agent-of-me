@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- Báo thức và hẹn giờ qua app Đồng hồ (quyền thường, tự được cấp) -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <!-- Chế độ phỏng vấn: nghe ở nền và hiện ô gợi ý nổi trên ứng dụng khác -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
@@ -25,6 +27,13 @@
         <intent><action android:name="android.intent.action.DIAL" /></intent>
         <intent><action android:name="android.intent.action.SENDTO" /></intent>
         <intent><action android:name="android.speech.RecognitionService" /></intent>
+        <!-- "Mở Zalo": tìm app theo tên trong các app có biểu tượng ngoài màn hình chính -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent><action android:name="android.intent.action.INSERT" /></intent>
+        <intent><action android:name="android.media.action.STILL_IMAGE_CAMERA" /></intent>
     </queries>
 
     <application
