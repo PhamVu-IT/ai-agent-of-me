@@ -86,7 +86,7 @@ class ModelDownloadWorker(ctx: Context, params: WorkerParameters) : CoroutineWor
             conn.connectTimeout = 20_000
             conn.readTimeout = 60_000
             conn.setRequestProperty("User-Agent", "tro-ly-ai")
-            if (token.isNotBlank() && url.host.endsWith("huggingface.co")) {
+            if (token.isNotBlank() && url.host == "huggingface.co") { // link CDN đã có chữ ký, không cần mã
                 conn.setRequestProperty("Authorization", "Bearer ${token.trim()}")
             }
             if (file.length() > 0) conn.setRequestProperty("Range", "bytes=${file.length()}-")
