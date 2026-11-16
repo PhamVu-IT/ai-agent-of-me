@@ -238,6 +238,17 @@ app chạy rồi đưa kết quả lại để trợ lý trả lời tiếp (t�
   nên chỉ bật những công cụ bạn cần.
 - App có quyền Internet nhưng chỉ dùng khi một skill hay máy chủ MCP cần; trò chuyện thường vẫn chạy offline.
 
+## ⚙️ Cài đặt mô hình và giọng đọc
+
+Mở ⋮ › ⚙️ Cài đặt (giống phần "Configs" của Google AI Edge Gallery):
+
+- **Chạy trên**: Tự chọn (thử GPU rồi CPU), GPU, hoặc CPU. Đổi mục này thì mô hình được nạp lại ở câu hỏi sau.
+- **Temperature, Top-K, Top-P**: chỉnh độ "sáng tạo" của câu trả lời. Mặc định giống Gallery (1,0 / 64 / 0,95).
+- **Chế độ suy nghĩ**: mô hình (như Gemma 4) nghĩ trước rồi mới trả lời. Phần suy nghĩ hiện trong khung 💭 trên câu trả lời, bấm để mở xem.
+- **Giọng đọc**: bật / tắt tự đọc câu trả lời, tốc độ, cao độ, chọn giọng tiếng Việt có trong máy, nút nghe thử.
+
+Mô hình `.task` (MediaPipe) chưa dùng được temperature / top-k / top-p và chế độ suy nghĩ; cần mô hình `.litertlm`.
+
 ## Bảo mật
 
 - **Khoá app:** mở app phải xác nhận vân tay, khuôn mặt hoặc mã PIN của máy. Rời app quá 1 phút thì khoá lại.

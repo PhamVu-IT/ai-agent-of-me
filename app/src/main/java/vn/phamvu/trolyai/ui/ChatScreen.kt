@@ -74,6 +74,7 @@ fun ChatScreen(
     onModels: () -> Unit,
     onStats: () -> Unit,
     onSkills: () -> Unit,
+    onSettings: () -> Unit,
     onPickImage: () -> Unit,
     onTakePhoto: () -> Unit,
 ) {
@@ -118,6 +119,7 @@ fun ChatScreen(
             onModels = onModels,
             onStats = onStats,
             onSkills = onSkills,
+            onSettings = onSettings,
         )
         if (!vm.modelReady.value || progress != null || vm.importNote.value.isNotEmpty()) {
             Box(Modifier.padding(horizontal = 12.dp)) {
@@ -145,6 +147,7 @@ fun ChatScreen(
                         name = name,
                         showSender = vm.messages.lastOrNull()?.fromUser != false,
                         text = vm.partial.value,
+                        thought = vm.thought.value,
                         status = vm.status.value,
                     )
                 }
@@ -158,6 +161,7 @@ fun ChatScreen(
                         name = name,
                         showSender = prev == null || prev.fromUser,
                         tools = vm.toolOutputs[m.id].orEmpty(),
+                        thought = vm.thoughts[m.id],
                         onRate = { r -> vm.rate(m, r) },
                         onSpeak = { onSpeak(m.text) },
                     )
@@ -214,6 +218,7 @@ private fun ChatTopBar(
     onModels: () -> Unit,
     onStats: () -> Unit,
     onSkills: () -> Unit,
+    onSettings: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
@@ -239,6 +244,7 @@ private fun ChatTopBar(
                     DropdownMenuItem(text = { Text("📊 Thống kê") }, onClick = { menu = false; onStats() })
                     DropdownMenuItem(text = { Text("🧩 Skill & MCP") }, onClick = { menu = false; onSkills() })
                     DropdownMenuItem(text = { Text("🧠 Mô hình") }, onClick = { menu = false; onModels() })
+                    DropdownMenuItem(text = { Text("⚙️ Cài đặt") }, onClick = { menu = false; onSettings() })
                     DropdownMenuItem(text = { Text("🎙️ Giọng của tôi") }, onClick = { menu = false; onVoiceSetup() })
                     DropdownMenuItem(text = { Text("🏦 Đọc biến động số dư") }, onClick = { menu = false; onBankSetup() })
                     DropdownMenuItem(text = { Text("🎧 Phỏng vấn") }, onClick = { menu = false; onInterview() })
@@ -410,12 +416,15 @@ private fun AgentMessage(
     name: String,
     showSender: Boolean,
     tools: List<ToolOutput>,
+    thought: String?,
     onRate: (Int) -> Unit,
     onSpeak: () -> Unit,
 ) {
     val copy = rememberCopy()
     Column(Modifier.fillMaxWidth().padding(end = 32.dp)) {
         if (showSender) SenderLabel(name)
+        // Phần suy nghĩ (nếu bật chế độ suy nghĩ): thu gọn, bấm để mở xem
+        if (!thought.isNullOrBlank()) ThoughtPanel(thought, live = false)
         // Skill / công cụ đã dùng: nhãn nhỏ, ảnh (ví dụ mã QR) và khung web (ví dụ bản đồ), như Gallery
         if (tools.isNotEmpty()) ToolResults(tools)
         AgentBubble(Modifier.combinedClickable(onClick = {}, onLongClick = { copy(m.text) })) {
@@ -433,15 +442,43 @@ private fun AgentMessage(
 
 /** Câu trả lời đang viết: ba chấm nhấp nháy khi chưa có chữ, sau đó chữ hiện dần. */
 @Composable
-private fun StreamingMessage(name: String, showSender: Boolean, text: String, status: String) {
+private fun StreamingMessage(name: String, showSender: Boolean, text: String, thought: String, status: String) {
     Column(Modifier.fillMaxWidth().padding(end = 32.dp)) {
         if (showSender) SenderLabel(name)
+        if (thought.isNotBlank()) ThoughtPanel(thought, live = text.isBlank())
         AgentBubble {
             if (text.isBlank()) Row(verticalAlignment = Alignment.CenterVertically) {
                 TypingDots()
                 if (status.isNotEmpty()) Text(status, Modifier.padding(start = 10.dp),
                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else Text(richText(text), style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+}
+
+/**
+ * Phần "suy nghĩ" của mô hình, như Gallery: lúc đang nghĩ thì mở sẵn và hiện dần, nghĩ xong thì thu gọn
+ * thành một dòng "💭 Suy nghĩ", bấm để mở ra xem.
+ */
+@Composable
+private fun ThoughtPanel(text: String, live: Boolean) {
+    var open by remember { mutableStateOf(false) }
+    val show = live || open
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.padding(bottom = 4.dp).clickable(enabled = !live) { open = !open },
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(if (live) "💭 Đang suy nghĩ…" else if (open) "💭 Suy nghĩ ▴" else "💭 Suy nghĩ ▾",
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (show) Text(
+                // Đang nghĩ thì chỉ hiện đoạn cuối cho gọn
+                if (live && text.length > 600) "…" + text.takeLast(600) else text,
+                Modifier.padding(top = 4.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

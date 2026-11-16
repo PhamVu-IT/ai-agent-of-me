@@ -28,7 +28,10 @@ import vn.phamvu.trolyai.interview.EnglishAsr
 import vn.phamvu.trolyai.voice.VietnameseAsr
 import vn.phamvu.trolyai.voice.VoiceId
 import vn.phamvu.trolyai.learn.Profile
+import vn.phamvu.trolyai.llm.GenSettings
 import vn.phamvu.trolyai.llm.GenStats
+import vn.phamvu.trolyai.settings.AppSettings
+import vn.phamvu.trolyai.settings.SpeechSettings
 import vn.phamvu.trolyai.media.ChatMedia
 import vn.phamvu.trolyai.media.MessageMedia
 
@@ -44,6 +47,30 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val thinking = mutableStateOf(false)
     /** Phần câu trả lời AI đang viết dở, hiện dần trên màn hình; rỗng khi chưa có chữ nào. */
     val partial = mutableStateOf("")
+    /** Phần "suy nghĩ" mô hình đang viết (chế độ suy nghĩ của Gemma 4), rỗng nếu không bật. */
+    val thought = mutableStateOf("")
+    /** Phần suy nghĩ của các câu trả lời trong lần mở app này, theo id tin nhắn, để mở ra xem lại. */
+    val thoughts = mutableStateMapOf<Long, String>()
+
+    // ---- Màn ⚙️ Cài đặt ----
+    private val appSettings = AppSettings(app)
+    val genSettings = mutableStateOf(appSettings.gen())
+    val speechSettings = mutableStateOf(appSettings.speech())
+
+    fun setGen(s: GenSettings) {
+        genSettings.value = s
+        appSettings.saveGen(s)
+        viewModelScope.launch {
+            val reload = s.backend != llm.settings.backend
+            llm.applySettings(s)
+            if (reload) backendLabel.value = ""
+        }
+    }
+
+    fun resetGen() = setGen(AppSettings.DEFAULT_GEN.copy(backend = genSettings.value.backend))
+
+    fun setSpeech(s: SpeechSettings) { speechSettings.value = s; appSettings.saveSpeech(s) }
+
     /** Dòng trạng thái dưới thanh tiến độ, ví dụ "Đang nạp mô hình…" hay "Đang suy nghĩ…". */
     val status = mutableStateOf("")
     /**
@@ -198,6 +225,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     init {
         // Nạp sẵn mô hình ngay khi mở app để câu hỏi đầu tiên không phải đợi nạp vài GB vào RAM
         viewModelScope.launch {
+            // Cài đặt (GPU / CPU, temperature…) phải có trước khi nạp mô hình
+            llm.applySettings(genSettings.value)
             if (!llm.hasModel() || llm.isLoaded()) return@launch
             status.value = "Đang nạp mô hình AI vào bộ nhớ…"
             try { llm.warmUp() } catch (e: CancellationException) { throw e } catch (e: Throwable) {
@@ -305,6 +334,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val myTurn = ++turnId
         thinking.value = true
         partial.value = ""
+        thought.value = ""
         status.value = if (llm.isLoaded() || !llm.hasModel()) "" else "Đang nạp mô hình AI, lần đầu hơi lâu…"
         job = viewModelScope.launch {
             // Lưu vào lịch sử kèm dấu 📷 / 🎙️ để đọc lại vẫn biết tin này có ảnh hay ghi âm (ảnh không lưu ra máy)
@@ -322,14 +352,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             var stat: TurnStat? = null
             var used: List<ToolOutput> = emptyList()
             val reply = try {
-                val turn = assistant.handle(text, jpegs, wavs) { p ->
+                val turn = assistant.handle(text, jpegs, wavs, onPartial = { p ->
                     // Gọi từ luồng của mô hình; Compose state cho phép ghi từ luồng khác.
                     // Lượt đã bị dừng (MediaPipe vẫn chạy nốt ở nền) thì không vẽ lên màn hình nữa.
                     if (myTurn != turnId) return@handle
                     if (firstMs == 0L) firstMs = System.currentTimeMillis() - t0
                     partial.value = p
                     status.value = ""
-                }
+                }, onThinking = { t ->
+                    if (myTurn == turnId) { thought.value = t; status.value = "" }
+                })
                 used = turn.tools
                 val total = System.currentTimeMillis() - t0
                 stat = TurnStat(
@@ -356,10 +388,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (myTurn != turnId) return@launch
             backendLabel.value = llm.backend
+            val thoughtText = thought.value
             finishTurn()
             stat?.let { stats.add(0, it); if (stats.size > 100) stats.removeAt(stats.size - 1) }
             val saved = add(ChatMessage(fromUser = false, text = reply))
             if (used.isNotEmpty()) toolOutputs[saved.id] = used
+            if (thoughtText.isNotBlank()) thoughts[saved.id] = thoughtText
         }
     }
 
@@ -430,6 +464,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private fun finishTurn() {
         thinking.value = false
         partial.value = ""
+        thought.value = ""
         status.value = ""
     }
 
@@ -459,7 +494,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val id = db.chats().insert(m)
         val saved = m.copy(id = id)
         messages.add(saved)
-        if (!saved.fromUser) toSpeak.value = saved
+        if (!saved.fromUser && speechSettings.value.autoSpeak) toSpeak.value = saved
         return saved
     }
 }

@@ -46,6 +46,7 @@ class Assistant(private val llm: LlmEngine, private val db: AppDb, private val t
         images: List<ByteArray> = emptyList(),
         audios: List<ByteArray> = emptyList(),
         onPartial: (String) -> Unit = {},
+        onThinking: (String) -> Unit = {},
     ): AssistantTurn {
         // Có ảnh hay ghi âm gửi kèm thì luôn để AI xem / nghe, không trả lời theo luật
         val media = images.isNotEmpty() || audios.isNotEmpty()
@@ -76,20 +77,25 @@ class Assistant(private val llm: LlmEngine, private val db: AppDb, private val t
             images = images,
             audios = audios,
         )
-        return agentLoop(turn, userText, onPartial)
+        return agentLoop(turn, userText, onPartial, onThinking)
     }
 
     /**
      * Như Gallery: mô hình có thể gọi skill / công cụ MCP; app chạy rồi gửi kết quả lại, mô hình trả lời tiếp.
      * Tối đa [MAX_STEPS] bước để không lặp mãi. Chữ mô hình viết ở các bước được nối lại để hiện dần.
      */
-    private suspend fun agentLoop(first: ChatTurn, userText: String, onPartial: (String) -> Unit): AssistantTurn {
+    private suspend fun agentLoop(
+        first: ChatTurn,
+        userText: String,
+        onPartial: (String) -> Unit,
+        onThinking: (String) -> Unit,
+    ): AssistantTurn {
         var turn = first
         val shown = StringBuilder()
         val used = mutableListOf<ToolOutput>()
         repeat(MAX_STEPS) { step ->
             val before = shown.toString()
-            val raw = llm.chat(turn) { partial -> partialReply(partial)?.let { onPartial(before + it) } }
+            val raw = llm.chat(turn, { partial -> partialReply(partial)?.let { onPartial(before + it) } }, onThinking)
             val res = parse(raw)
             val action = res.action
             val toolBox = tools

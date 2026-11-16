@@ -41,6 +41,7 @@ import vn.phamvu.trolyai.security.BiometricAuthenticator
 import vn.phamvu.trolyai.security.VoiceThenBiometric
 import vn.phamvu.trolyai.ui.AppTheme
 import vn.phamvu.trolyai.ui.ChatScreen
+import vn.phamvu.trolyai.ui.SettingsScreen
 import vn.phamvu.trolyai.ui.SkillsScreen
 import vn.phamvu.trolyai.ui.StatsScreen
 import vn.phamvu.trolyai.voice.VietnameseSpeech
@@ -50,6 +51,20 @@ import java.util.Locale
 class MainActivity : FragmentActivity() {
     private val vm: ChatViewModel by viewModels()
     private var tts: TextToSpeech? = null
+    /** Tên các giọng tiếng Việt có trong máy, cho màn ⚙️ Cài đặt. */
+    private val ttsVoices = mutableStateOf<List<String>>(emptyList())
+
+    /** Đọc to theo cài đặt giọng đọc (tốc độ, cao độ, giọng đã chọn). */
+    private fun speak(text: String) {
+        val t = tts ?: return
+        val s = vm.speechSettings.value
+        t.setSpeechRate(s.rate)
+        t.setPitch(s.pitch)
+        val voice = s.voice.takeIf { it.isNotEmpty() }
+            ?.let { name -> runCatching { t.voices?.firstOrNull { it.name == name } }.getOrNull() }
+        if (voice != null) t.voice = voice else t.language = Locale("vi", "VN")
+        t.speak(text, TextToSpeech.QUEUE_FLUSH, null, "r")
+    }
     private lateinit var auth: BiometricAuthenticator
     private lateinit var voice: VoiceId
 
@@ -58,7 +73,7 @@ class MainActivity : FragmentActivity() {
     private var backgroundSince = 0L
     private var authenticating = false // màn hình nhập PIN làm app tạm ẩn, tránh hỏi lại hai lần
 
-    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh", "thongke" hoặc "skill"
+    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh", "thongke", "skill" hoặc "caidat"
     private val voicePrompt = mutableStateOf<String?>(null) // dòng chữ khi đang nghe để nhận giọng
 
     // Nghe tiếng Việt ngay trong app (ưu tiên mô hình offline), không mở hộp thoại "Voice search" của Google
@@ -154,7 +169,14 @@ class MainActivity : FragmentActivity() {
         if (Build.VERSION.SDK_INT >= 33) perms += Manifest.permission.POST_NOTIFICATIONS
         askPermissions.launch(perms.toTypedArray())
 
-        tts = TextToSpeech(this) { tts?.language = Locale("vi", "VN") }
+        tts = TextToSpeech(this) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale("vi", "VN")
+                ttsVoices.value = runCatching {
+                    tts?.voices.orEmpty().filter { it.locale.language == "vi" }.map { it.name }.sorted()
+                }.getOrDefault(emptyList())
+            }
+        }
         auth = BiometricAuthenticator(this)
         voice = VoiceId(this, (application as App).db)
         speech = VietnameseSpeech(this, lifecycleScope)
@@ -172,9 +194,12 @@ class MainActivity : FragmentActivity() {
                         screen.value == "skill" -> SkillsScreen(vm,
                             onImportFolder = { pickingFile = true; pickSkillFolder.launch(null) },
                             onBack = { screen.value = "chat" })
+                        screen.value == "caidat" -> SettingsScreen(vm, ttsVoices.value,
+                            onTestVoice = { speak("Xin chào, mình là trợ lý của bạn. Giọng đọc này nghe ổn không?") },
+                            onBack = { screen.value = "chat" })
                         else -> ChatScreen(vm,
                             onMic = { listen(manual = true) },
-                            onSpeak = { tts?.speak(it, TextToSpeech.QUEUE_FLUSH, null, "r") },
+                            onSpeak = ::speak,
                             // Phải xác nhận vân tay trước, để người khác không đăng ký giọng của họ thay bạn
                             onVoiceSetup = { lifecycleScope.launch { if (auth.confirm("Đăng ký giọng chủ máy")) screen.value = "giong" } },
                             onBankSetup = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
@@ -183,6 +208,7 @@ class MainActivity : FragmentActivity() {
                             onModels = { screen.value = "mohinh" },
                             onStats = { screen.value = "thongke" },
                             onSkills = { screen.value = "skill" },
+                            onSettings = { screen.value = "caidat" },
                             onPickImage = {
                                 pickingFile = true
                                 pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
