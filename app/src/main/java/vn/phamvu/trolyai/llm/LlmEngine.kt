@@ -42,6 +42,34 @@ interface LlmEngine {
 
     /** Dừng câu trả lời đang sinh (nút ■). Phần chữ đã sinh vẫn được trả về. */
     fun stop() {}
+
+    /** Số liệu của lượt chat gần nhất, cho màn 📊 Thống kê; null nếu chưa có. */
+    val lastStats: GenStats? get() = null
+}
+
+/**
+ * Số liệu một lượt sinh chữ, giống thanh số liệu của Google AI Edge Gallery.
+ * Thư viện gọi lại mỗi lần có một token mới, nên số lần gọi lại xấp xỉ số token đã sinh.
+ */
+data class GenStats(
+    /** Từ lúc mô hình bắt đầu đọc câu hỏi tới chữ đầu tiên (gồm thời gian đọc prompt). */
+    val ttftMs: Long,
+    /** Từ lúc mô hình bắt đầu tới khi xong. */
+    val totalMs: Long,
+    /** Số token đã sinh (ước lượng bằng số lần thư viện gọi lại). */
+    val tokens: Int,
+    /** Số ký tự mô hình phải đọc ở lượt này (chỉ lời nhắn mới nếu dùng lại cuộc trò chuyện). */
+    val promptChars: Int,
+    /** Lượt này mô hình phải bắt đầu cuộc trò chuyện mới (đọc lại cả phần system) hay dùng lại cuộc cũ. */
+    val freshChat: Boolean,
+    /** Ước lượng số ký tự đang nằm trong bộ nhớ ngữ cảnh của mô hình. */
+    val contextChars: Int,
+) {
+    /** Tốc độ sinh chữ (token/giây), không tính lúc đọc prompt. */
+    val decodeTps: Double get() {
+        val ms = totalMs - ttftMs
+        return if (tokens > 1 && ms > 0) (tokens - 1) * 1000.0 / ms else 0.0
+    }
 }
 
 /**
@@ -145,8 +173,31 @@ class OfflineLlm(private val context: Context) : LlmEngine {
 
     /** Lượt chat: với .litertlm thì dùng lại cuộc trò chuyện đang giữ trong mô hình (xem [LiteRtLmRunner.chat]). */
     override suspend fun chat(turn: ChatTurn, onPartial: (String) -> Unit): String = lock.withLock {
-        withContext(Dispatchers.IO) { ensureLoaded().chat(turn, onPartial) }
+        withContext(Dispatchers.IO) {
+            val r = ensureLoaded()
+            // Đo từ lúc có khoá (không tính lúc xếp hàng chờ việc khác), đếm số lần thư viện báo chữ mới
+            val t0 = System.currentTimeMillis()
+            var first = 0L
+            var chunks = 0
+            val out = r.chat(turn) { p ->
+                if (chunks++ == 0) first = System.currentTimeMillis() - t0
+                onPartial(p)
+            }
+            val fresh = r.lastChatFresh
+            lastStats = GenStats(
+                ttftMs = first,
+                totalMs = System.currentTimeMillis() - t0,
+                tokens = chunks,
+                promptChars = if (fresh) turn.toGemmaPrompt().length else turn.user.length,
+                freshChat = fresh,
+                contextChars = r.contextChars,
+            )
+            out
+        }
     }
+
+    @Volatile override var lastStats: GenStats? = null
+        private set
 
     /** Không chờ khoá: phải dừng được ngay cả khi luồng khác đang giữ khoá để sinh chữ. */
     override fun stop() { runner?.stop() }
@@ -243,6 +294,12 @@ internal interface Runner : AutoCloseable {
 
     /** Dừng câu đang sinh, nếu thư viện cho phép. */
     fun stop() {}
+
+    /** Lượt chat vừa rồi có phải bắt đầu cuộc trò chuyện mới không (MediaPipe: luôn đọc lại cả prompt). */
+    val lastChatFresh: Boolean get() = true
+
+    /** Ước lượng số ký tự đang nằm trong bộ nhớ ngữ cảnh (MediaPipe: không giữ gì giữa các lượt). */
+    val contextChars: Int get() = 0
 }
 
 /**
@@ -328,6 +385,9 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
     /** Cuộc trò chuyện đang sinh chữ, để nút dừng huỷ được. */
     @Volatile private var active: Conversation? = null
     @Volatile private var cancelled = false
+    override var lastChatFresh = true
+        private set
+    override val contextChars: Int get() = if (chatConv == null) 0 else (chatSystem?.length ?: 0) + chatChars
 
     /** Câu một lần (học ban đêm, phỏng vấn): tạo cuộc trò chuyện riêng rồi bỏ, không đụng tới cuộc chat. */
     override fun generate(prompt: String, onPartial: ((String) -> Unit)?): String =
@@ -343,6 +403,7 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
         val fresh = chatConv == null || chatSystem != turn.system ||
             turn.system.length + chatChars + turn.user.length > CHAT_CHAR_BUDGET
         if (fresh) newChat(turn)
+        lastChatFresh = fresh
         return try {
             val out = run(chatConv!!, turn.user, onPartial)
             chatChars += turn.user.length + out.length
@@ -354,6 +415,7 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
             if (fresh || e is OutOfMemoryError) throw e
             // Thường do cuộc trò chuyện cũ đã đầy: làm lại một lần với cuộc trò chuyện mới
             newChat(turn)
+            lastChatFresh = true
             run(chatConv!!, turn.user, onPartial).also { chatChars += turn.user.length + it.length }
         }
     }

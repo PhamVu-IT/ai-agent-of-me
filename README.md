@@ -198,8 +198,10 @@ Màn hình chat làm theo kiểu [Google AI Edge Gallery](https://github.com/goo
 - Bong bóng tin nhắn có "đuôi", tên và hình tròn của trợ lý trên câu trả lời, màu theo hình nền máy (Android 12+), tự đổi sáng / tối.
 - Ba chấm "đang gõ…" trong lúc chờ chữ đầu tiên, rồi câu trả lời hiện dần từng chữ, màn hình tự bám theo dòng cuối.
 - Nút gửi thành nút dừng ■ khi trợ lý đang viết; dừng thì giữ phần đã viết.
-- Dưới mỗi câu trả lời: 👍 👎, 📋 chép, 🔊 đọc lại, và thời gian (tổng, chữ đầu, GPU/CPU). Giữ lâu bong bóng để chép.
-- Các nút Mô hình, Giọng của tôi, Đọc biến động số dư, Phỏng vấn nằm trong menu ⋮ trên cùng.
+- Dưới mỗi câu trả lời: 👍 👎, 📋 chép, 🔊 đọc lại. Giữ lâu bong bóng để chép.
+- Nút 📊 trên cùng mở màn Thống kê riêng (không chen vào màn chat): tốc độ token/giây, thời gian tới chữ đầu, số token,
+  bộ nhớ ngữ cảnh đã dùng, RAM, thời gian nạp mô hình, trung bình và danh sách các câu gần đây.
+- Các nút Thống kê, Mô hình, Giọng của tôi, Đọc biến động số dư, Phỏng vấn nằm trong menu ⋮ trên cùng.
 
 Vì sao nhanh hơn: với mô hình `.litertlm`, app giữ một cuộc trò chuyện LiteRT-LM sống qua các lượt như Gallery.
 Mô hình đã đọc phần vai trò, quy tắc, hồ sơ một lần, mỗi lượt sau chỉ đọc lời nhắn mới, nên chữ đầu tiên ra sớm hơn

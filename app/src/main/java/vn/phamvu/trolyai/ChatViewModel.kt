@@ -3,7 +3,6 @@ package vn.phamvu.trolyai
 import android.app.Application
 import android.net.Uri
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -18,6 +17,7 @@ import vn.phamvu.trolyai.interview.EnglishAsr
 import vn.phamvu.trolyai.voice.VietnameseAsr
 import vn.phamvu.trolyai.voice.VoiceId
 import vn.phamvu.trolyai.learn.Profile
+import vn.phamvu.trolyai.llm.GenStats
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val db = (app as App).db
@@ -32,10 +32,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** Dòng trạng thái dưới thanh tiến độ, ví dụ "Đang nạp mô hình…" hay "Đang suy nghĩ…". */
     val status = mutableStateOf("")
     /**
-     * Dòng nhỏ dưới mỗi câu trả lời trong lần mở app này (theo id tin nhắn): mất bao lâu và trả lời bằng cách nào,
-     * giống dòng thời gian dưới tin nhắn của Google AI Edge Gallery.
+     * Số liệu từng lượt trong lần mở app này (mới nhất ở đầu), cho màn 📊 Thống kê. Không hiện ở màn chat
+     * để màn chat gọn; cần xem thì mở màn thống kê.
      */
-    val timings = mutableStateMapOf<Long, String>()
+    val stats = mutableStateListOf<TurnStat>()
     /** Tên trợ lý hiện trên đầu màn hình và trên bong bóng trả lời. */
     val assistantName = mutableStateOf("Trợ lý")
     /** Ví dụ "LiteRT-LM GPU", rỗng khi mô hình chưa nạp. */
@@ -201,7 +201,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val t0 = System.currentTimeMillis()
             var firstMs = 0L
             val wasLoaded = llm.isLoaded()
-            var timing = ""
+            var stat: TurnStat? = null
             val reply = try {
                 val turn = assistant.handle(text.trim()) { p ->
                     // Gọi từ luồng của mô hình; Compose state cho phép ghi từ luồng khác.
@@ -212,17 +212,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     status.value = ""
                 }
                 val total = System.currentTimeMillis() - t0
-                val voice = if (voiceMs > 0) "🎤 ${sec(voiceMs)} · " else ""
-                timing = voice + when (turn.tier) {
-                    Tier.QUICK -> "⏱ ${sec(total)} · trả lời nhanh, không dùng AI"
-                    Tier.DATA -> "⏱ ${sec(total)} · đọc dữ liệu trong máy"
-                    Tier.LLM -> buildString {
-                        append("⏱ ${sec(total)}")
-                        if (firstMs > 0) append(" · chữ đầu ${sec(firstMs)}")
-                        append(" · ${llm.backend}")
-                        if (!wasLoaded) append(" · nạp mô hình ${sec(llm.loadMs)}")
-                    }
-                }
+                stat = TurnStat(
+                    at = System.currentTimeMillis(),
+                    question = text.trim(),
+                    tier = turn.tier,
+                    totalMs = total,
+                    firstMs = firstMs,
+                    voiceMs = voiceMs,
+                    backend = if (turn.tier == Tier.LLM) llm.backend else "",
+                    loadMs = if (turn.tier == Tier.LLM && !wasLoaded) llm.loadMs else 0,
+                    gen = if (turn.tier == Tier.LLM) llm.lastStats else null,
+                )
                 val result = turn.action?.let { runCatching { executor.run(it) }.getOrElse { e -> "Không thực hiện được: ${e.message}" } }
                 // Hành động set_profile có thể vừa đổi tên trợ lý
                 if (turn.action?.type == "set_profile") assistantName.value = Profile(db).assistantName()
@@ -237,7 +237,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             if (myTurn != turnId) return@launch
             backendLabel.value = llm.backend
             finishTurn()
-            add(ChatMessage(fromUser = false, text = reply), timing)
+            stat?.let { stats.add(0, it); if (stats.size > 100) stats.removeAt(stats.size - 1) }
+            add(ChatMessage(fromUser = false, text = reply))
         }
     }
 
@@ -253,7 +254,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         job?.cancel()
         finishTurn()
         viewModelScope.launch {
-            add(ChatMessage(fromUser = false, text = shown.ifBlank { "(Đã dừng)" }), "■ đã dừng")
+            add(ChatMessage(fromUser = false, text = shown.ifBlank { "(Đã dừng)" }))
         }
     }
 
@@ -276,13 +277,36 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun sec(ms: Long) = "%.1f s".format(ms / 1000.0).replace('.', ',')
+    /** Thông tin mô hình cho màn thống kê. */
+    fun modelInfo(): ModelInfo = ModelInfo(
+        file = if (llm.hasModel()) llm.modelFile.name else "",
+        sizeMb = llm.modelSizeMb(),
+        backend = llm.backend,
+        loadMs = llm.loadMs,
+        loaded = llm.isLoaded(),
+    )
 
-    private suspend fun add(m: ChatMessage, timing: String = "") {
+    private suspend fun add(m: ChatMessage) {
         val id = db.chats().insert(m)
         val saved = m.copy(id = id)
-        if (timing.isNotEmpty()) timings[id] = timing
         messages.add(saved)
         if (!saved.fromUser) toSpeak.value = saved
     }
 }
+
+/** Một lượt hỏi đáp: trả lời ở tầng nào, mất bao lâu, và (nếu dùng AI) số liệu của mô hình. */
+data class TurnStat(
+    val at: Long,
+    val question: String,
+    val tier: Tier,
+    val totalMs: Long,
+    /** Từ lúc bấm gửi tới khi chữ đầu hiện lên (0 nếu không dùng AI). */
+    val firstMs: Long,
+    val voiceMs: Long,
+    val backend: String,
+    /** Thời gian nạp mô hình nếu lượt này phải nạp (0 nếu đã nạp sẵn). */
+    val loadMs: Long,
+    val gen: GenStats?,
+)
+
+data class ModelInfo(val file: String, val sizeMb: Long, val backend: String, val loadMs: Long, val loaded: Boolean)

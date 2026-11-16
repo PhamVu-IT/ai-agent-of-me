@@ -52,7 +52,7 @@ import kotlin.math.sin
 /**
  * Màn hình chat theo kiểu Google AI Edge Gallery: thanh tiêu đề gọn, bong bóng tin nhắn có "đuôi", ba chấm
  * "đang gõ…" khi chờ chữ đầu tiên, câu trả lời hiện dần từng chữ, nút gửi biến thành nút dừng ■ khi trợ lý đang viết,
- * dòng thời gian nhỏ dưới mỗi câu trả lời, giữ lâu để chép.
+ * giữ lâu để chép. Số liệu tốc độ nằm ở màn 📊 Thống kê riêng.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,6 +65,7 @@ fun ChatScreen(
     onInterview: () -> Unit,
     onPickModel: () -> Unit,
     onModels: () -> Unit,
+    onStats: () -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
     val progress = vm.importProgress.value
@@ -105,6 +106,7 @@ fun ChatScreen(
             onBankSetup = onBankSetup,
             onInterview = onInterview,
             onModels = onModels,
+            onStats = onStats,
         )
         if (!vm.modelReady.value || progress != null || vm.importNote.value.isNotEmpty()) {
             Box(Modifier.padding(horizontal = 12.dp)) {
@@ -144,7 +146,6 @@ fun ChatScreen(
                         m = m,
                         name = name,
                         showSender = prev == null || prev.fromUser,
-                        timing = vm.timings[m.id],
                         onRate = { r -> vm.rate(m, r) },
                         onSpeak = { onSpeak(m.text) },
                     )
@@ -179,6 +180,7 @@ private fun ChatTopBar(
     onBankSetup: () -> Unit,
     onInterview: () -> Unit,
     onModels: () -> Unit,
+    onStats: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
@@ -196,10 +198,12 @@ private fun ChatTopBar(
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            TextButton(onClick = onModels) { Text("🧠") }
+            // Số liệu tốc độ để riêng một màn, không chen vào màn chat
+            TextButton(onClick = onStats) { Text("📊") }
             Box {
                 TextButton(onClick = { menu = true }) { Text("⋮", fontSize = 20.sp) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text("📊 Thống kê") }, onClick = { menu = false; onStats() })
                     DropdownMenuItem(text = { Text("🧠 Mô hình") }, onClick = { menu = false; onModels() })
                     DropdownMenuItem(text = { Text("🎙️ Giọng của tôi") }, onClick = { menu = false; onVoiceSetup() })
                     DropdownMenuItem(text = { Text("🏦 Đọc biến động số dư") }, onClick = { menu = false; onBankSetup() })
@@ -254,7 +258,6 @@ private fun AgentMessage(
     m: ChatMessage,
     name: String,
     showSender: Boolean,
-    timing: String?,
     onRate: (Int) -> Unit,
     onSpeak: () -> Unit,
 ) {
@@ -270,9 +273,6 @@ private fun AgentMessage(
             SmallAction(if (m.rating < 0) "👎✓" else "👎") { onRate(-1) }
             SmallAction("📋") { copy(m.text) }
             SmallAction("🔊", onSpeak)
-            if (!timing.isNullOrEmpty()) Text(timing, Modifier.padding(start = 4.dp),
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2)
         }
     }
 }

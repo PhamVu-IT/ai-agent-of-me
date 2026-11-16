@@ -40,6 +40,7 @@ import vn.phamvu.trolyai.security.BiometricAuthenticator
 import vn.phamvu.trolyai.security.VoiceThenBiometric
 import vn.phamvu.trolyai.ui.AppTheme
 import vn.phamvu.trolyai.ui.ChatScreen
+import vn.phamvu.trolyai.ui.StatsScreen
 import vn.phamvu.trolyai.voice.VietnameseSpeech
 import vn.phamvu.trolyai.voice.VoiceId
 import java.util.Locale
@@ -55,7 +56,7 @@ class MainActivity : FragmentActivity() {
     private var backgroundSince = 0L
     private var authenticating = false // màn hình nhập PIN làm app tạm ẩn, tránh hỏi lại hai lần
 
-    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan" hoặc "mohinh"
+    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh" hoặc "thongke"
     private val voicePrompt = mutableStateOf<String?>(null) // dòng chữ khi đang nghe để nhận giọng
 
     // Nghe tiếng Việt ngay trong app (ưu tiên mô hình offline), không mở hộp thoại "Voice search" của Google
@@ -131,6 +132,7 @@ class MainActivity : FragmentActivity() {
                         screen.value == "giong" -> VoiceEnrollScreen(voice, vm, pickers, onDone = { screen.value = "chat" })
                         screen.value == "phongvan" -> InterviewScreen(vm, pickers, onBack = { screen.value = "chat" })
                         screen.value == "mohinh" -> ModelsScreen(vm, pickers, onBack = { screen.value = "chat" })
+                        screen.value == "thongke" -> StatsScreen(vm, onBack = { screen.value = "chat" })
                         else -> ChatScreen(vm,
                             onMic = { listen(manual = true) },
                             onSpeak = { tts?.speak(it, TextToSpeech.QUEUE_FLUSH, null, "r") },
@@ -139,7 +141,8 @@ class MainActivity : FragmentActivity() {
                             onBankSetup = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
                             onInterview = { screen.value = "phongvan" },
                             onPickModel = pickers.model,
-                            onModels = { screen.value = "mohinh" })
+                            onModels = { screen.value = "mohinh" },
+                            onStats = { screen.value = "thongke" })
                     }
                     micPrompt.value?.let { msg ->
                         Dialog(onDismissRequest = ::stopListening) {
