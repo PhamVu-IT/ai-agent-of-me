@@ -208,6 +208,18 @@ Mô hình đã đọc phần vai trò, quy tắc, hồ sơ một lần, mỗi l�
 nhiều. Cuộc trò chuyện tự làm mới (kèm 6 câu gần nhất) khi quy tắc / hồ sơ / tên thay đổi, khi sắp đầy 4096 token,
 hoặc sau khi bấm dừng. Mô hình `.task` (MediaPipe) vẫn chạy như cũ.
 
+**Trả lời bằng chữ bình thường như Gallery.** Trợ lý không còn trả lời dạng JSON. Khi cần làm việc gì (nhắc nhở, ghi nhớ,
+gọi điện…) mô hình viết thêm một dòng cuối `[[LỆNH]] {...}`; app tự cắt dòng đó đi, không hiện ra, rồi thực hiện lệnh.
+Mô hình nào vẫn quen trả JSON kiểu cũ thì app vẫn hiểu.
+
+**Gửi ảnh và ghi âm cho AI** (nút ＋ cạnh ô nhập, như Gallery):
+- 📷 Chụp ảnh hoặc 🖼️ Chọn ảnh (tối đa 5 ảnh), hỏi về ảnh: "đây là món gì", "đọc giúp hoá đơn này"…
+- 🎙️ Ghi âm tối đa 30 giây để AI nghe (khác nút 🎤 là nói để gõ chữ). Bấm ▶ để nghe lại trước khi gửi.
+- Cần mô hình `.litertlm` có phần xem ảnh và nghe, ví dụ Gemma 3n (`gemma-3n-E2B-it-int4.litertlm`) hoặc Gemma 4.
+  App tự thử nạp phần ảnh / âm thanh; mô hình chỉ có chữ thì vẫn chạy bình thường và báo không xem ảnh được.
+  Mô hình `.task` (MediaPipe) chưa hỗ trợ.
+- Ảnh và đoạn ghi âm chỉ nằm trong RAM khi app đang mở, không lưu ra bộ nhớ máy; lịch sử chat chỉ ghi dấu 📷 / 🎙️.
+
 File `ui/MessageBubbleShape.kt` lấy từ Gallery (Apache License 2.0, giữ nguyên ghi chú bản quyền của Google).
 
 ## Bảo mật

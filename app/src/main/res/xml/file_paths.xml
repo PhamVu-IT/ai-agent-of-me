@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Thư mục ảnh chụp tạm, chỉ app máy ảnh được ghi vào khi bấm "📷 Chụp ảnh" -->
+<paths>
+    <cache-path name="camera" path="camera/" />
+</paths>

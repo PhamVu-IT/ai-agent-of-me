@@ -1,12 +1,19 @@
 package vn.phamvu.trolyai
 
 import android.app.Application
+import android.graphics.Bitmap
+import android.media.AudioTrack
 import android.net.Uri
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import vn.phamvu.trolyai.agent.ActionExecutor
@@ -18,6 +25,8 @@ import vn.phamvu.trolyai.voice.VietnameseAsr
 import vn.phamvu.trolyai.voice.VoiceId
 import vn.phamvu.trolyai.learn.Profile
 import vn.phamvu.trolyai.llm.GenStats
+import vn.phamvu.trolyai.media.ChatMedia
+import vn.phamvu.trolyai.media.MessageMedia
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val db = (app as App).db
@@ -41,6 +50,22 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** Ví dụ "LiteRT-LM GPU", rỗng khi mô hình chưa nạp. */
     val backendLabel = mutableStateOf("")
     private var job: Job? = null
+
+    // Ảnh và ghi âm đính kèm tin nhắn sắp gửi (như Gallery). Chỉ giữ trong RAM, không lưu ra máy.
+    val attachedImages = mutableStateListOf<Bitmap>()
+    /** Đoạn ghi âm đính kèm (PCM 16 kHz), null nếu không có. */
+    val attachedAudio = mutableStateOf<ByteArray?>(null)
+    val recording = mutableStateOf(false)
+    val recordMs = mutableLongStateOf(0L)
+    val recordLevel = mutableFloatStateOf(0f)
+    @Volatile private var stopRecording = false
+    private var recordCancelled = false
+    /** Ảnh / ghi âm của các tin đã gửi trong lần mở app này, theo id tin nhắn, để hiện trong bong bóng. */
+    val media = mutableStateMapOf<Long, MessageMedia>()
+    private var player: AudioTrack? = null
+    /** Báo lỗi ngắn khi chọn ảnh hay thu âm hỏng. */
+    val mediaNote = mutableStateOf("")
+
     /** Tăng mỗi lượt; lượt đã bị dừng thì không được ghi đè trạng thái của lượt mới. */
     @Volatile private var turnId = 0
 
@@ -189,21 +214,106 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** [voiceMs] là thời gian nghe và nhận dạng giọng nói (nếu nói bằng 🎤), để hiện trong dòng thời gian. */
-    fun send(text: String, voiceMs: Long = 0) {
-        if (text.isBlank() || thinking.value) return
+    /** Thêm ảnh từ thư viện hoặc máy ảnh vào tin nhắn sắp gửi (tối đa [ChatMedia.MAX_IMAGES] ảnh). */
+    fun attachImages(uris: List<Uri>) {
+        viewModelScope.launch {
+            mediaNote.value = ""
+            for (uri in uris) {
+                if (attachedImages.size >= ChatMedia.MAX_IMAGES) { mediaNote.value = "Tối đa ${ChatMedia.MAX_IMAGES} ảnh một lần."; break }
+                try { attachedImages.add(ChatMedia.loadImage(getApplication<Application>(), uri)) }
+                catch (e: CancellationException) { throw e }
+                catch (e: Throwable) { mediaNote.value = "Không mở được ảnh: ${e.message ?: e.javaClass.simpleName}" }
+            }
+        }
+    }
+
+    fun removeImage(i: Int) { if (i in attachedImages.indices) attachedImages.removeAt(i) }
+
+    /** Bắt đầu thu âm để gửi cho mô hình nghe (khác nút 🎤 là đổi giọng nói thành chữ). */
+    fun startRecording() {
+        if (recording.value) return
+        stopPlaying()
+        stopRecording = false
+        recordCancelled = false
+        recordMs.longValue = 0
+        recordLevel.floatValue = 0f
+        recording.value = true
+        mediaNote.value = ""
+        viewModelScope.launch {
+            try {
+                val pcm = ChatMedia.record({ stopRecording }) { ms, level ->
+                    recordMs.longValue = ms
+                    recordLevel.floatValue = level
+                }
+                if (!recordCancelled && ChatMedia.durationMs(pcm) >= 500) attachedAudio.value = pcm
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                mediaNote.value = "Không thu âm được: ${e.message ?: e.javaClass.simpleName}"
+            } finally {
+                recording.value = false
+            }
+        }
+    }
+
+    /** Xong ([cancel] = false) thì giữ đoạn vừa thu để gửi; huỷ thì bỏ. */
+    fun finishRecording(cancel: Boolean) {
+        recordCancelled = cancel
+        stopRecording = true
+    }
+
+    fun removeAudio() { stopPlaying(); attachedAudio.value = null }
+
+    fun play(pcm: ByteArray) {
+        stopPlaying()
+        player = ChatMedia.play(pcm)
+    }
+
+    private fun stopPlaying() {
+        player?.let { runCatching { it.stop() }; it.release() }
+        player = null
+    }
+
+    override fun onCleared() { stopRecording = true; stopPlaying(); super.onCleared() }
+
+    /**
+     * Gửi tin nhắn cùng ảnh / ghi âm đang đính kèm (nếu có).
+     * [voiceMs] là thời gian nghe và nhận dạng giọng nói (nếu nói bằng 🎤), để hiện ở màn thống kê.
+     */
+    fun send(input: String, voiceMs: Long = 0) {
+        val images = attachedImages.toList()
+        val audio = attachedAudio.value
+        if ((input.isBlank() && images.isEmpty() && audio == null) || thinking.value || recording.value) return
+        val text = input.trim().ifEmpty {
+            when {
+                images.isNotEmpty() && audio != null -> "Hãy xem ảnh và nghe đoạn ghi âm này giúp mình."
+                images.isNotEmpty() -> "Ảnh này có gì vậy?"
+                else -> "Hãy nghe đoạn ghi âm này giúp mình."
+            }
+        }
+        attachedImages.clear()
+        attachedAudio.value = null
+        stopPlaying()
         val myTurn = ++turnId
         thinking.value = true
         partial.value = ""
         status.value = if (llm.isLoaded() || !llm.hasModel()) "" else "Đang nạp mô hình AI, lần đầu hơi lâu…"
         job = viewModelScope.launch {
-            add(ChatMessage(fromUser = true, text = text.trim()))
+            // Lưu vào lịch sử kèm dấu 📷 / 🎙️ để đọc lại vẫn biết tin này có ảnh hay ghi âm (ảnh không lưu ra máy)
+            val tag = buildString {
+                if (images.isNotEmpty()) append(if (images.size > 1) "📷×${images.size} " else "📷 ")
+                if (audio != null) append("🎙️ ")
+            }
+            val userMsg = add(ChatMessage(fromUser = true, text = tag + text))
+            if (images.isNotEmpty() || audio != null) media[userMsg.id] = MessageMedia(images, audio)
+            val jpegs = withContext(Dispatchers.Default) { images.map(ChatMedia::toJpeg) }
+            val wavs = listOfNotNull(audio?.let { ChatMedia.wav(it) })
             val t0 = System.currentTimeMillis()
             var firstMs = 0L
             val wasLoaded = llm.isLoaded()
             var stat: TurnStat? = null
             val reply = try {
-                val turn = assistant.handle(text.trim()) { p ->
+                val turn = assistant.handle(text, jpegs, wavs) { p ->
                     // Gọi từ luồng của mô hình; Compose state cho phép ghi từ luồng khác.
                     // Lượt đã bị dừng (MediaPipe vẫn chạy nốt ở nền) thì không vẽ lên màn hình nữa.
                     if (myTurn != turnId) return@handle
@@ -214,7 +324,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 val total = System.currentTimeMillis() - t0
                 stat = TurnStat(
                     at = System.currentTimeMillis(),
-                    question = text.trim(),
+                    question = tag + text,
                     tier = turn.tier,
                     totalMs = total,
                     firstMs = firstMs,
@@ -286,11 +396,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         loaded = llm.isLoaded(),
     )
 
-    private suspend fun add(m: ChatMessage) {
+    private suspend fun add(m: ChatMessage): ChatMessage {
         val id = db.chats().insert(m)
         val saved = m.copy(id = id)
         messages.add(saved)
         if (!saved.fromUser) toSpeak.value = saved
+        return saved
     }
 }
 

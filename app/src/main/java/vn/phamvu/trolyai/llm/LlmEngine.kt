@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Contents
@@ -19,7 +20,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
-import org.json.JSONObject
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CountDownLatch
 import kotlin.coroutines.coroutineContext
@@ -45,6 +45,9 @@ interface LlmEngine {
 
     /** Số liệu của lượt chat gần nhất, cho màn 📊 Thống kê; null nếu chưa có. */
     val lastStats: GenStats? get() = null
+
+    /** Mô hình đang nạp có xem ảnh và nghe âm thanh được không. */
+    val supportsMedia: Boolean get() = false
 }
 
 /**
@@ -78,7 +81,27 @@ data class GenStats(
  * - [history]: vài câu gần đây (true = người dùng nói), chỉ dùng khi bắt đầu cuộc trò chuyện mới.
  * - [user]: lời nhắn mới kèm dữ liệu riêng của lượt này (giờ, điều nhớ liên quan, sổ chi…).
  */
-data class ChatTurn(val system: String, val history: List<Pair<Boolean, String>>, val user: String) {
+data class ChatTurn(
+    val system: String,
+    val history: List<Pair<Boolean, String>>,
+    val user: String,
+    /** Ảnh gửi kèm (JPEG), chỉ mô hình .litertlm có phần xem ảnh mới dùng được. */
+    val images: List<ByteArray> = emptyList(),
+    /** Đoạn ghi âm gửi kèm (WAV 16 kHz mono), chỉ mô hình .litertlm có phần nghe mới dùng được. */
+    val audios: List<ByteArray> = emptyList(),
+) {
+    val hasMedia: Boolean get() = images.isNotEmpty() || audios.isNotEmpty()
+
+    /** Ước lượng chỗ ảnh và âm thanh chiếm trong bộ nhớ ngữ cảnh, tính ra ký tự cho dễ cộng với chữ. */
+    val mediaChars: Int get() = images.size * IMAGE_CHARS + audios.sumOf { (it.size / 32_000) * 16 + 100 }
+
+    companion object {
+        /** Một ảnh khoảng 256–280 token với Gemma 3n / Gemma 4, quy ra khoảng 700 ký tự. */
+        const val IMAGE_CHARS = 700
+        const val NO_MEDIA = "Mô hình đang dùng chưa xem ảnh hay nghe âm thanh được. Hãy chọn ở \"🧠 Mô hình\" một file " +
+            ".litertlm có hỗ trợ ảnh và âm thanh, ví dụ gemma-3n-E2B-it-int4.litertlm hoặc gemma-4-E2B-it.litertlm."
+    }
+
     /** Ghép tất cả thành một prompt khuôn Gemma, cho MediaPipe (.task) và các việc không cần nhớ hội thoại. */
     fun toGemmaPrompt(): String {
         val hist = history.joinToString("\n") { (fromUser, text) -> (if (fromUser) "Họ: " else "Bạn: ") + text }
@@ -199,6 +222,8 @@ class OfflineLlm(private val context: Context) : LlmEngine {
     @Volatile override var lastStats: GenStats? = null
         private set
 
+    override val supportsMedia: Boolean get() = (runner as? LiteRtLmRunner)?.media == true
+
     /** Không chờ khoá: phải dừng được ngay cả khi luồng khác đang giữ khoá để sinh chữ. */
     override fun stop() { runner?.stop() }
 
@@ -289,8 +314,11 @@ internal interface Runner : AutoCloseable {
     /** Sinh câu trả lời; nếu có [onPartial] thì báo dần cả đoạn đã sinh. Chạy chặn luồng, gọi từ Dispatchers.IO/Default. */
     fun generate(prompt: String, onPartial: ((String) -> Unit)?): String
 
-    /** Một lượt chat; mặc định không nhớ gì giữa các lượt, lịch sử nằm cả trong prompt. */
-    fun chat(turn: ChatTurn, onPartial: (String) -> Unit): String = generate(turn.toGemmaPrompt(), onPartial)
+    /** Một lượt chat; mặc định không nhớ gì giữa các lượt, lịch sử nằm cả trong prompt, không nhận ảnh / âm thanh. */
+    fun chat(turn: ChatTurn, onPartial: (String) -> Unit): String {
+        require(!turn.hasMedia) { ChatTurn.NO_MEDIA }
+        return generate(turn.toGemmaPrompt(), onPartial)
+    }
 
     /** Dừng câu đang sinh, nếu thư viện cho phép. */
     fun stop() {}
@@ -360,11 +388,17 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
     private val engine: Engine
     override val backend: String
 
+    /** Mô hình nạp được cả phần xem ảnh và nghe âm thanh (ví dụ Gemma 3n, Gemma 4) hay chỉ có chữ. */
+    val media: Boolean
+
     init {
-        fun load(b: Backend) = Engine(
+        fun load(b: Backend, withMedia: Boolean) = Engine(
             EngineConfig(
                 modelPath = file.absolutePath,
                 backend = b,
+                // Như Gallery: phần xem ảnh chạy cùng loại với phần chữ, phần nghe chạy trên CPU
+                visionBackend = if (withMedia) (if (b is Backend.CPU) Backend.CPU() else Backend.GPU()) else null,
+                audioBackend = if (withMedia) Backend.CPU() else null,
                 maxNumTokens = MAX_TOKENS, // giống bản MediaPipe
                 // Lưu bộ đệm nhân GPU đã dịch, lần mở app sau nạp nhanh hơn
                 cacheDir = context.cacheDir.path,
@@ -372,9 +406,22 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
         ).also { e ->
             try { e.initialize() } catch (t: Throwable) { runCatching { e.close() }; throw t }
         }
-        val (e, b) = gpuThenCpu({ load(Backend.GPU()) }, { load(Backend.CPU()) })
-        engine = e
-        backend = b
+        // Thử nạp kèm phần ảnh / âm thanh; mô hình chỉ có chữ thì nạp lại không kèm. Nhớ kết quả cho từng file
+        // để lần mở app sau không phải thử lại (mỗi lần thử hỏng tốn thời gian nạp).
+        val prefs = context.getSharedPreferences("llm", Context.MODE_PRIVATE)
+        val key = "media:${file.length()}:${file.lastModified()}"
+        val tryMedia = prefs.getBoolean(key, true)
+        fun loadBest(b: () -> Backend): Pair<Engine, Boolean> {
+            if (tryMedia) {
+                try { return load(b(), true) to true } catch (t: Throwable) { if (t is OutOfMemoryError) throw t }
+            }
+            return load(b(), false) to false
+        }
+        val (pair, b) = gpuThenCpu({ loadBest { Backend.GPU() } }, { loadBest { Backend.CPU() } })
+        engine = pair.first
+        media = pair.second
+        prefs.edit().putBoolean(key, media).apply()
+        backend = if (media) "$b, xem ảnh + nghe" else b
     }
 
     /** Cuộc trò chuyện chat đang giữ trong mô hình (bộ nhớ KV đã tính sẵn), cùng phần system đã dùng để tạo nó. */
@@ -391,7 +438,7 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
 
     /** Câu một lần (học ban đêm, phỏng vấn): tạo cuộc trò chuyện riêng rồi bỏ, không đụng tới cuộc chat. */
     override fun generate(prompt: String, onPartial: ((String) -> Unit)?): String =
-        engine.createConversation().use { run(it, stripGemmaTurns(prompt), onPartial) }
+        engine.createConversation().use { run(it, Contents.of(stripGemmaTurns(prompt)), onPartial) }
 
     /**
      * Cách Google AI Edge Gallery làm cho nhanh: giữ một Conversation sống qua các lượt. Mô hình đã "đọc" phần
@@ -400,13 +447,19 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
      * sắp đầy bộ nhớ ngữ cảnh, hoặc lượt trước bị dừng / lỗi.
      */
     override fun chat(turn: ChatTurn, onPartial: (String) -> Unit): String {
+        require(!turn.hasMedia || media) { ChatTurn.NO_MEDIA }
         val fresh = chatConv == null || chatSystem != turn.system ||
-            turn.system.length + chatChars + turn.user.length > CHAT_CHAR_BUDGET
+            turn.system.length + chatChars + turn.user.length + turn.mediaChars > CHAT_CHAR_BUDGET
         if (fresh) newChat(turn)
         lastChatFresh = fresh
+        // Như Gallery: ảnh và âm thanh đặt trước chữ để mô hình đọc theo đúng thứ tự
+        val contents = Contents.of(
+            turn.images.map { Content.ImageBytes(it) } + turn.audios.map { Content.AudioBytes(it) } + Content.Text(turn.user)
+        )
+        val used = turn.user.length + turn.mediaChars
         return try {
-            val out = run(chatConv!!, turn.user, onPartial)
-            chatChars += turn.user.length + out.length
+            val out = run(chatConv!!, contents, onPartial)
+            chatChars += used + out.length
             // Bị dừng giữa chừng: mô hình còn giữ nửa câu trả lời, lượt sau làm lại cho sạch
             if (cancelled) dropChat()
             out
@@ -416,7 +469,7 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
             // Thường do cuộc trò chuyện cũ đã đầy: làm lại một lần với cuộc trò chuyện mới
             newChat(turn)
             lastChatFresh = true
-            run(chatConv!!, turn.user, onPartial).also { chatChars += turn.user.length + it.length }
+            run(chatConv!!, contents, onPartial).also { chatChars += used + it.length }
         }
     }
 
@@ -448,14 +501,14 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
     }
 
     /** Sinh chữ trên [conversation], báo dần qua [onPartial]. Bị dừng thì trả phần đã sinh, không báo lỗi. */
-    private fun run(conversation: Conversation, text: String, onPartial: ((String) -> Unit)?): String {
+    private fun run(conversation: Conversation, contents: Contents, onPartial: ((String) -> Unit)?): String {
         val sb = StringBuilder()
         val done = CountDownLatch(1)
         var error: Throwable? = null
         cancelled = false
         active = conversation
         try {
-            conversation.sendMessageAsync(text, object : MessageCallback {
+            conversation.sendMessageAsync(contents, object : MessageCallback {
                 override fun onMessage(message: Message) {
                     // Mỗi lần nhận một khúc chữ mới
                     val chunk = message.toString()
@@ -496,7 +549,6 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
         /**
          * Lịch sử cho cuộc trò chuyện mới. Khuôn chat của Gemma đòi lượt người dùng và lượt mô hình xen kẽ,
          * bắt đầu bằng người dùng, nên bỏ các câu trợ lý nói trước và gộp các câu liền nhau cùng một người.
-         * Câu của trợ lý được bọc lại thành JSON như mô hình vẫn trả lời, để nó giữ đúng cách viết.
          */
         internal fun historyMessages(history: List<Pair<Boolean, String>>): List<Message> {
             val merged = mutableListOf<Pair<Boolean, String>>()
@@ -509,7 +561,7 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
             if (merged.lastOrNull()?.first == true) merged.removeAt(merged.size - 1)
             return merged.map { (fromUser, text) ->
                 if (fromUser) Message.user(text)
-                else Message.model("{\"reply\": ${JSONObject.quote(text)}, \"action\": null}")
+                else Message.model(text)
             }
         }
     }

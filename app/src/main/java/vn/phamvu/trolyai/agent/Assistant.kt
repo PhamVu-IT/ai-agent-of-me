@@ -35,15 +35,22 @@ class Assistant(private val llm: LlmEngine, private val db: AppDb) {
      * 3. Còn lại mới gọi mô hình AI suy nghĩ; chữ hiện dần qua [onPartial] trong lúc AI đang viết.
      * Đang có lời sửa (sau 👎) thì luôn để AI xử lý để nó ghi được bài học.
      */
-    suspend fun handle(userText: String, onPartial: (String) -> Unit = {}): AssistantTurn {
+    suspend fun handle(
+        userText: String,
+        images: List<ByteArray> = emptyList(),
+        audios: List<ByteArray> = emptyList(),
+        onPartial: (String) -> Unit = {},
+    ): AssistantTurn {
+        // Có ảnh hay ghi âm gửi kèm thì luôn để AI xem / nghe, không trả lời theo luật
+        val media = images.isNotEmpty() || audios.isNotEmpty()
         // Tên, xưng hô, "tôi là ai": trả lời từ hồ sơ trên máy, luôn đúng và tức thì
-        owner.answer(userText)?.let { return AssistantTurn(it, null, Tier.DATA) }
+        if (!media) owner.answer(userText)?.let { return AssistantTurn(it, null, Tier.DATA) }
         val correction = profile.get(Profile.PENDING_CORRECTION)?.takeIf { it.isNotBlank() }
-        if (correction == null) {
+        if (correction == null && !media) {
             val (self, you) = xungHo()
             QuickReply.answer(userText, self, you)?.let { return AssistantTurn(it, null, Tier.QUICK) }
             data.answer(userText, you)?.let { return AssistantTurn(it, null, Tier.DATA) }
-        } else {
+        } else if (correction != null) {
             profile.put(Profile.PENDING_CORRECTION, "")
         }
         // Tin nhắn mới nhất đã được lưu trước khi gọi hàm này; bỏ nó khỏi lịch sử để không lặp.
@@ -57,7 +64,11 @@ class Assistant(private val llm: LlmEngine, private val db: AppDb) {
                 memories = relevantMemories(userText),
                 money = if (aboutMoney(userText)) Finance(db).summaryForPrompt() else null,
                 correction = correction,
+                images = images.size,
+                audios = audios.size,
             ),
+            images = images,
+            audios = audios,
         )
         val raw = llm.chat(turn) { partial -> partialReply(partial)?.let(onPartial) }
         return parse(raw)
@@ -72,12 +83,32 @@ class Assistant(private val llm: LlmEngine, private val db: AppDb) {
             .containsMatchIn(Finance.normalize(text))
 
     /**
-     * Lấy phần "reply" từ JSON AI đang viết dở để hiện dần lên màn hình.
-     * AI viết {"reply": "Chào bạn...  thì trả về "Chào bạn...". Chưa tới phần reply thì trả null.
+     * Phần chữ để hiện dần lên màn hình trong lúc AI đang viết. AI trả lời bằng lời bình thường như
+     * Google AI Edge Gallery; nếu có việc cần làm thì dòng cuối là "[[LỆNH]] {...}", phần đó không hiện ra.
+     * Chưa có chữ nào để hiện thì trả null.
      */
     private fun partialReply(raw: String): String? {
-        val trimmed = raw.trimStart().removePrefix("```json").removePrefix("```").trimStart()
-        if (!trimmed.startsWith("{")) return trimmed.takeIf { it.isNotBlank() }
+        val text = stripFence(raw)
+        // Mô hình cũ quen trả JSON {"reply": "..."}: vẫn lấy được phần reply
+        if (text.startsWith("{")) return jsonReplyPartial(text)
+        return cutAction(text).trimEnd().takeIf { it.isNotBlank() }
+    }
+
+    /** Bỏ phần lệnh ở cuối: từ "[[" (kể cả đang viết dở) hoặc một dòng bắt đầu bằng "{". */
+    private fun cutAction(text: String): String {
+        var end = text.length
+        ACTION_MARK.find(text)?.let { end = minOf(end, it.range.first) }
+        text.indexOf("[[").takeIf { it >= 0 }?.let { end = minOf(end, it) }
+        // Dấu "[" lẻ ở cuối có thể là đầu của "[[LỆNH]]" đang viết dở
+        if (text.endsWith("[")) end = minOf(end, text.length - 1)
+        Regex("(?m)^\\s*\\{").find(text)?.let { end = minOf(end, it.range.first) }
+        return text.substring(0, end)
+    }
+
+    private fun stripFence(raw: String): String =
+        raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+
+    private fun jsonReplyPartial(trimmed: String): String? {
         val key = Regex("\"reply\"\\s*:\\s*\"").find(trimmed) ?: return null
         val sb = StringBuilder()
         var i = key.range.last + 1
@@ -148,9 +179,13 @@ $ruleText
 Mỗi lời nhắn của họ kèm giờ hiện tại, điều bạn nhớ liên quan và (nếu cần) sổ chi định kỳ. Sổ chi là dữ liệu thật:
 chỉ trả lời về tiền dựa trên đó, không đoán.
 
-Chỉ trả lời bằng MỘT đối tượng JSON, không viết gì khác:
-{"reply": "câu trả lời", "action": null}
-hoặc kèm một hành động:
+Cách trả lời: viết bằng lời bình thường, tự nhiên như nhắn tin cho bạn bè (được dùng **chữ đậm** và gạch đầu dòng).
+KHÔNG viết JSON hay mã trong câu trả lời.
+Chỉ khi cần làm một việc dưới đây thì sau câu trả lời viết thêm MỘT dòng cuối: [[LỆNH]] rồi đến JSON của việc đó.
+Ví dụ:
+Được rồi, 8 giờ sáng mai mình nhắc bạn uống thuốc nhé!
+[[LỆNH]] {"type":"remind","text":"Uống thuốc","at":"2026-11-17T08:00"}
+Các việc làm được:
 - Ghi nhớ điều họ kể: {"type":"remember","content":"..."}
 - Ghi lại quy tắc / lời sửa: {"type":"learn_rule","rule":"..."}
 - Lưu tên và xưng hô: {"type":"set_profile","user_name":"Vũ","assistant_name":"Mây","xung_ho":"em - anh"}
@@ -166,7 +201,9 @@ hoặc kèm một hành động:
     }
 
     /** Lời nhắn của lượt này kèm dữ liệu chỉ dùng cho câu này. */
-    private fun userTurn(user: String, memories: List<String>, money: String?, correction: String?): String {
+    private fun userTurn(
+        user: String, memories: List<String>, money: String?, correction: String?, images: Int = 0, audios: Int = 0,
+    ): String {
         val now = fmt.format(Date())
         val mem = if (memories.isEmpty()) "(chưa có)" else memories.joinToString("\n") { "- $it" }
         return buildString {
@@ -178,22 +215,42 @@ LƯU Ý: họ vừa không hài lòng với câu trả lời này của bạn: "
 Lời nhắn mới có thể là lời sửa. Nếu đúng vậy, xin lỗi ngắn gọn, làm lại cho đúng,
 và ghi lại bài học bằng hành động learn_rule để lần sau không sai nữa.
 """)
+            if (images > 0) append("\nHọ gửi kèm $images ảnh ở trên. Hãy xem kỹ ảnh rồi trả lời.")
+            if (audios > 0) append("\nHọ gửi kèm một đoạn ghi âm ở trên. Hãy nghe kỹ rồi trả lời (nếu cần thì chép lại lời nói).")
             append("\nLời nhắn mới: $user")
         }
     }
 
+    /** Tách câu trả lời (chữ bình thường) và lệnh ở dòng cuối (nếu có). */
     private fun parse(raw: String): AssistantTurn {
-        val start = raw.indexOf('{')
-        val end = raw.lastIndexOf('}')
-        // Không có JSON trọn vẹn (ví dụ bấm dừng giữa chừng): lấy phần reply đã viết được
-        if (start < 0 || end <= start) return AssistantTurn(partialReply(raw) ?: raw.trim(), null)
+        val text = stripFence(raw)
+        if (text.startsWith("{") && text.contains("\"reply\"")) return parseLegacyJson(text)
+        val reply = cutAction(text).trim()
+        val rest = text.substring(cutAction(text).length)
+        val action = rest.indexOf('{').takeIf { it >= 0 }?.let { s ->
+            val e = rest.lastIndexOf('}')
+            if (e <= s) null else runCatching { JSONObject(rest.substring(s, e + 1)) }.getOrNull()
+        }?.takeIf { it.optString("type").isNotBlank() }?.let { Action(it.optString("type"), it) }
+        return AssistantTurn(reply.ifBlank { if (action == null) text else "" }, action)
+    }
+
+    /** Kiểu trả lời cũ {"reply": "...", "action": {...}}, phòng khi mô hình vẫn viết như vậy. */
+    private fun parseLegacyJson(text: String): AssistantTurn {
+        val start = text.indexOf('{')
+        val end = text.lastIndexOf('}')
+        if (end <= start) return AssistantTurn(jsonReplyPartial(text) ?: text, null)
         return try {
-            val obj = JSONObject(raw.substring(start, end + 1))
+            val obj = JSONObject(text.substring(start, end + 1))
             val a = obj.optJSONObject("action")
             AssistantTurn(obj.optString("reply", ""), a?.let { Action(it.optString("type"), it) })
         } catch (e: Exception) {
             // JSON hỏng (thường do AI viết bị cắt): vẫn cứu được phần reply nếu có
-            AssistantTurn(partialReply(raw) ?: raw.trim(), null)
+            AssistantTurn(jsonReplyPartial(text) ?: text, null)
         }
+    }
+
+    private companion object {
+        /** Dấu mở đầu dòng lệnh; nhận cả khi mô hình viết không dấu hay khác hoa thường. */
+        val ACTION_MARK = Regex("\\[\\[\\s*L[ỆEệe]NH\\s*\\]\\]", RegexOption.IGNORE_CASE)
     }
 }
