@@ -285,6 +285,14 @@ Câu ngắn hay gặp được làm ngay mà không cần chờ AI. Cách này c
 
 Android không cho app tự bật Wi‑Fi hay chỉnh độ sáng. Với những việc này, app mở đúng bảng cài đặt để bạn bấm một lần. Lịch và danh bạ được mở sẵn thông tin để bạn xem lại rồi tự bấm Lưu.
 
+## 🖼️ Tìm ảnh bằng chữ, offline
+
+Mở ⋮ › 🖼️ Tìm ảnh, cho phép đọc ảnh rồi bấm **Bắt đầu đọc ảnh**. AI (Gemma 3n / Gemma 4 .litertlm) xem từng ảnh một lần, mới nhất trước, và viết mô tả ngắn kèm từ khoá tiếng Việt và tiếng Anh. Mỗi ảnh mất vài giây. Bạn có thể dừng bất cứ lúc nào, lần sau app đọc tiếp.
+
+Đọc xong thì tìm bằng lời, ví dụ "con mèo", "sinh nhật", "bãi biển năm 2023", "hoá đơn tiền điện tháng 5". Gõ không dấu cũng tìm được. Bấm vào ảnh để mở, bấm ⓘ để xem mô tả AI đã viết.
+
+Bật **Tự đọc ảnh mới khi đang sạc** thì mỗi ngày, lúc máy đang sạc và bạn không dùng, app đọc thêm tối đa 200 ảnh. Mô tả chỉ lưu trong bộ nhớ riêng của app. Ảnh không gửi đi đâu.
+
 ## Bảo mật
 
 - **Khoá app:** mở app phải xác nhận vân tay, khuôn mặt hoặc mã PIN của máy. Rời app quá 1 phút thì khoá lại.

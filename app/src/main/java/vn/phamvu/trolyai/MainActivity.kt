@@ -43,6 +43,8 @@ import vn.phamvu.trolyai.ui.AppTheme
 import vn.phamvu.trolyai.ui.ChatScreen
 import vn.phamvu.trolyai.models.ModelStoreScreen
 import vn.phamvu.trolyai.models.ModelStoreViewModel
+import vn.phamvu.trolyai.photos.PhotoSearchScreen
+import vn.phamvu.trolyai.photos.PhotoSearchViewModel
 import vn.phamvu.trolyai.scribe.ScribeScreen
 import vn.phamvu.trolyai.scribe.ScribeViewModel
 import vn.phamvu.trolyai.ui.SettingsScreen
@@ -58,6 +60,11 @@ class MainActivity : FragmentActivity() {
     private val scribe: ScribeViewModel by viewModels()
     /** Chỉ tạo khi mở màn 📥 Tải mô hình. */
     private val store: ModelStoreViewModel by viewModels()
+    /** Chỉ tạo khi mở màn 🖼️ Tìm ảnh. */
+    private val photos: PhotoSearchViewModel by viewModels()
+    private val askPhotoPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        photos.onPermission(ok)
+    }
     private var tts: TextToSpeech? = null
     /** Tên các giọng tiếng Việt có trong máy, cho màn ⚙️ Cài đặt. */
     private val ttsVoices = mutableStateOf<List<String>>(emptyList())
@@ -81,7 +88,7 @@ class MainActivity : FragmentActivity() {
     private var backgroundSince = 0L
     private var authenticating = false // màn hình nhập PIN làm app tạm ẩn, tránh hỏi lại hai lần
 
-    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh", "thongke", "skill", "caidat", "cheploi" hoặc "taimohinh"
+    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh", "thongke", "skill", "caidat", "cheploi", "taimohinh" hoặc "timanh"
     private val voicePrompt = mutableStateOf<String?>(null) // dòng chữ khi đang nghe để nhận giọng
 
     // Nghe tiếng Việt ngay trong app (ưu tiên mô hình offline), không mở hộp thoại "Voice search" của Google
@@ -212,6 +219,12 @@ class MainActivity : FragmentActivity() {
                         screen.value == "caidat" -> SettingsScreen(vm, ttsVoices.value,
                             onTestVoice = { speak("Xin chào, mình là trợ lý của bạn. Giọng đọc này nghe ổn không?") },
                             onBack = { screen.value = "chat" })
+                        screen.value == "timanh" -> PhotoSearchScreen(photos,
+                            onAskPermission = {
+                                askPhotoPermission.launch(if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES
+                                    else Manifest.permission.READ_EXTERNAL_STORAGE)
+                            },
+                            onBack = { screen.value = "chat" })
                         screen.value == "cheploi" -> ScribeScreen(scribe,
                             onPickFile = { pickingFile = true; pickAudio.launch(arrayOf("audio/*", "video/*")) },
                             onBack = { screen.value = "chat" })
@@ -228,6 +241,7 @@ class MainActivity : FragmentActivity() {
                             onSkills = { screen.value = "skill" },
                             onSettings = { screen.value = "caidat" },
                             onScribe = { screen.value = "cheploi" },
+                            onPhotos = { screen.value = "timanh" },
                             onPickImage = {
                                 pickingFile = true
                                 pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))

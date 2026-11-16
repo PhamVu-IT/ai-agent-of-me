@@ -269,7 +269,12 @@ class OfflineLlm(private val context: Context) : LlmEngine {
 
     /** Nghe một đoạn âm thanh WAV và làm theo [prompt] (chép lời, dịch…), không đụng tới cuộc chat. */
     suspend fun listen(wav: ByteArray, prompt: String, onPartial: ((String) -> Unit)? = null): String = lock.withLock {
-        withContext(Dispatchers.IO) { ensureLoaded().listen(wav, prompt, onPartial) }
+        withContext(Dispatchers.IO) { ensureLoaded().media(emptyList(), listOf(wav), prompt, onPartial) }
+    }
+
+    /** Xem một ảnh JPEG và làm theo [prompt] (ví dụ mô tả ảnh để tìm kiếm), không đụng tới cuộc chat. */
+    suspend fun look(jpeg: ByteArray, prompt: String): String = lock.withLock {
+        withContext(Dispatchers.IO) { ensureLoaded().media(listOf(jpeg), emptyList(), prompt, null) }
     }
 
     /** Nạp sẵn mô hình vào RAM khi mở app, để câu hỏi đầu tiên không phải đợi nạp vài chục giây. */
@@ -380,8 +385,11 @@ internal interface Runner : AutoCloseable {
         return generate(turn.toGemmaPrompt(), onPartial)
     }
 
-    /** Nghe một đoạn âm thanh (WAV) và làm theo [prompt], ví dụ chép lời hay dịch. Chỉ mô hình nhận âm thanh mới làm được. */
-    fun listen(wav: ByteArray, prompt: String, onPartial: ((String) -> Unit)?): String =
+    /**
+     * Một câu riêng có kèm ảnh (JPEG) hoặc âm thanh (WAV), ví dụ chép lời hay mô tả ảnh. Không đụng tới cuộc chat.
+     * Chỉ mô hình nhận ảnh / âm thanh mới làm được.
+     */
+    fun media(images: List<ByteArray>, audios: List<ByteArray>, prompt: String, onPartial: ((String) -> Unit)?): String =
         throw IllegalStateException(ChatTurn.NO_MEDIA)
 
     /** Dừng câu đang sinh, nếu thư viện cho phép. */
@@ -516,15 +524,14 @@ internal class LiteRtLmRunner(
         engine.createConversation().use { run(it, Contents.of(stripGemmaTurns(prompt)), onPartial) }
 
     /**
-     * Chép lời / dịch một đoạn âm thanh như Audio Scribe của Gallery: cuộc trò chuyện riêng, âm thanh trước rồi tới lời dặn.
-     * Chọn chữ chắc nhất ở mỗi bước (top-k 1) để bản chép sát lời nói, không "sáng tạo" thêm.
+     * Chép lời / dịch âm thanh (như Audio Scribe của Gallery) hay mô tả ảnh: cuộc trò chuyện riêng, ảnh / âm thanh trước
+     * rồi tới lời dặn. Chọn chữ chắc nhất ở mỗi bước (top-k 1) để kết quả sát thực tế, không "sáng tạo" thêm.
      */
-    override fun listen(wav: ByteArray, prompt: String, onPartial: ((String) -> Unit)?): String {
+    override fun media(images: List<ByteArray>, audios: List<ByteArray>, prompt: String, onPartial: ((String) -> Unit)?): String {
         require(media) { ChatTurn.NO_MEDIA }
         val config = ConversationConfig(samplerConfig = SamplerConfig(topK = 1, topP = 1.0, temperature = 1.0))
-        return engine.createConversation(config).use {
-            run(it, Contents.of(listOf(Content.AudioBytes(wav), Content.Text(prompt))), onPartial)
-        }
+        val parts = images.map { Content.ImageBytes(it) } + audios.map { Content.AudioBytes(it) } + Content.Text(prompt)
+        return engine.createConversation(config).use { run(it, Contents.of(parts), onPartial) }
     }
 
     /**
