@@ -365,7 +365,16 @@ fun ChatScreen(
                 }
             }
         }
-        if (vm.thinking.value) LinearProgressIndicator(Modifier.fillMaxWidth())
+        // Câu trả lời AI đang viết dở hiện dần, để không phải ngồi chờ màn hình trống
+        if (vm.partial.value.isNotBlank()) {
+            Card(Modifier.padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Text(vm.partial.value + " ▍", Modifier.padding(10.dp))
+            }
+        }
+        if (vm.thinking.value || vm.status.value.isNotEmpty()) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (vm.status.value.isNotEmpty()) Text(vm.status.value, style = MaterialTheme.typography.bodySmall)
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(input, { input = it }, Modifier.weight(1f), placeholder = { Text("Nhắn cho trợ lý…") })
             TextButton(onClick = onMic) { Text("🎤") }

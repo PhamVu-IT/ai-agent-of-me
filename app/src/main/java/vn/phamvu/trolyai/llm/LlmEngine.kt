@@ -16,6 +16,10 @@ import kotlin.coroutines.coroutineContext
 /** Giao diện chung để sau này đổi sang llama.cpp hoặc gọi API online mà không sửa phần còn lại. */
 interface LlmEngine {
     suspend fun generate(prompt: String): String
+
+    /** Như [generate] nhưng báo dần phần chữ đã sinh qua [onPartial] (toàn bộ chữ tính tới lúc đó). */
+    suspend fun generateStream(prompt: String, onPartial: (String) -> Unit): String =
+        generate(prompt).also(onPartial)
 }
 
 /**
@@ -48,6 +52,32 @@ class MediaPipeEngine(private val context: Context) : LlmEngine {
     override suspend fun generate(prompt: String): String = lock.withLock {
         withContext(Dispatchers.Default) { ensureLoaded().generateResponse(prompt) }
     }
+
+    /**
+     * Sinh chữ từng khúc để màn hình hiện dần câu trả lời, không phải đợi xong cả câu.
+     * Mô hình tự gọi lại với từng khúc mới; ta cộng dồn rồi báo cả đoạn qua [onPartial].
+     */
+    override suspend fun generateStream(prompt: String, onPartial: (String) -> Unit): String = lock.withLock {
+        withContext(Dispatchers.IO) {
+            val sb = StringBuilder()
+            val future = ensureLoaded().generateResponseAsync(prompt) { partial, _ ->
+                if (!partial.isNullOrEmpty()) {
+                    synchronized(sb) { sb.append(partial) }
+                    onPartial(synchronized(sb) { sb.toString() })
+                }
+            }
+            val full = future.get()
+            full?.takeIf { it.isNotBlank() } ?: synchronized(sb) { sb.toString() }
+        }
+    }
+
+    /** Nạp sẵn mô hình vào RAM khi mở app, để câu hỏi đầu tiên không phải đợi nạp vài chục giây. */
+    suspend fun warmUp() {
+        if (!hasModel() || llm != null) return
+        lock.withLock { withContext(Dispatchers.Default) { ensureLoaded() } }
+    }
+
+    fun isLoaded(): Boolean = llm != null
 
     /**
      * Chép file mô hình người dùng chọn (qua trình chọn file của Android) vào chỗ của app rồi nạp thử.
