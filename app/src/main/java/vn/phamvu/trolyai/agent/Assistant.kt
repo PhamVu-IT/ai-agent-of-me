@@ -3,6 +3,7 @@ package vn.phamvu.trolyai.agent
 import org.json.JSONObject
 import vn.phamvu.trolyai.data.AppDb
 import vn.phamvu.trolyai.data.ChatMessage
+import vn.phamvu.trolyai.dates.Dates
 import vn.phamvu.trolyai.finance.Finance
 import vn.phamvu.trolyai.learn.Profile
 import vn.phamvu.trolyai.llm.ChatTurn
@@ -36,6 +37,17 @@ class Assistant(private val llm: LlmEngine, private val db: AppDb) {
      * Đang có lời sửa (sau 👎) thì luôn để AI xử lý để nó ghi được bài học.
      */
     suspend fun handle(userText: String, onPartial: (String) -> Unit = {}): AssistantTurn {
+        // Câu có ngày giỗ / sinh nhật / kỷ niệm thì lưu ngay vào sổ, không phụ thuộc AI có nhận ra hay không
+        val dates = Dates(db)
+        val captured = runCatching { dates.captureFrom(userText, "ai") }.getOrDefault(emptyList())
+        val turn = answer(userText, onPartial)
+        val note = dates.confirmation(captured) ?: return turn
+        // Đã lưu rồi thì bỏ hành động add_event của AI (nếu có) để khỏi báo "đã có trong sổ"
+        val action = turn.action?.takeIf { it.type != "add_event" }
+        return turn.copy(reply = listOf(turn.reply, note).filter { it.isNotBlank() }.joinToString("\n"), action = action)
+    }
+
+    private suspend fun answer(userText: String, onPartial: (String) -> Unit): AssistantTurn {
         // Tên, xưng hô, "tôi là ai": trả lời từ hồ sơ trên máy, luôn đúng và tức thì
         owner.answer(userText)?.let { return AssistantTurn(it, null, Tier.DATA) }
         val correction = profile.get(Profile.PENDING_CORRECTION)?.takeIf { it.isNotBlank() }
@@ -56,6 +68,7 @@ class Assistant(private val llm: LlmEngine, private val db: AppDb) {
                 user = userText,
                 memories = relevantMemories(userText),
                 money = if (aboutMoney(userText)) Finance(db).summaryForPrompt() else null,
+                dates = Dates(db).promptBlock(),
                 correction = correction,
             ),
         )
@@ -145,7 +158,8 @@ $summary
 Quy tắc họ đã dặn, LUÔN tuân theo:
 $ruleText
 
-Mỗi lời nhắn của họ kèm giờ hiện tại, điều bạn nhớ liên quan và (nếu cần) sổ chi định kỳ. Sổ chi là dữ liệu thật:
+Mỗi lời nhắn của họ kèm giờ hiện tại, điều bạn nhớ liên quan, ngày quan trọng sắp tới và (nếu cần) sổ chi định kỳ.
+Nếu sắp tới có ngày giỗ, sinh nhật, kỷ niệm mà họ chưa nhắc, hãy chủ động nhắc khéo một câu khi hợp lúc. Sổ chi là dữ liệu thật:
 chỉ trả lời về tiền dựa trên đó, không đoán.
 
 Chỉ trả lời bằng MỘT đối tượng JSON, không viết gì khác:
@@ -162,17 +176,22 @@ hoặc kèm một hành động:
 - Mở web/bản đồ: {"type":"open_url","url":"..."}
 - Thêm khoản chi cố định hằng tháng: {"type":"add_obligation","name":"Tiền nhà","day":5,"amount":5000000,"keywords":"tien nha,thue nha"}
 - Báo đã trả một khoản: {"type":"paid","name":"Tiền nhà","amount":5000000}
+- Lưu ngày lặp lại hằng năm (giỗ, sinh nhật, kỷ niệm) để năm nào cũng tự nhắc:
+  {"type":"add_event","title":"Giỗ ông nội","day":10,"month":3,"lunar":true,"kind":"gio","year":null}
+  kind là "gio", "sinh_nhat", "ky_niem" hoặc "khac"; lunar true nếu là ngày âm lịch (giỗ thường là âm lịch);
+  year là năm gốc nếu biết (năm sinh, năm cưới). Khi họ kể một ngày như vậy, LUÔN dùng add_event thay vì remember.
 """.trim()
     }
 
     /** Lời nhắn của lượt này kèm dữ liệu chỉ dùng cho câu này. */
-    private fun userTurn(user: String, memories: List<String>, money: String?, correction: String?): String {
+    private fun userTurn(user: String, memories: List<String>, money: String?, dates: String?, correction: String?): String {
         val now = fmt.format(Date())
         val mem = if (memories.isEmpty()) "(chưa có)" else memories.joinToString("\n") { "- $it" }
         return buildString {
             append("Giờ hiện tại: $now.\n")
             append("Điều bạn nhớ liên quan:\n$mem\n")
             if (money != null) append("Sổ chi định kỳ:\n$money\n")
+            if (dates != null) append("Ngày quan trọng trong 30 ngày tới:\n$dates\n")
             if (correction != null) append("""
 LƯU Ý: họ vừa không hài lòng với câu trả lời này của bạn: "$correction".
 Lời nhắn mới có thể là lời sửa. Nếu đúng vậy, xin lỗi ngắn gọn, làm lại cho đúng,

@@ -1,6 +1,7 @@
 package vn.phamvu.trolyai.agent
 
 import vn.phamvu.trolyai.data.AppDb
+import vn.phamvu.trolyai.dates.Dates
 import vn.phamvu.trolyai.finance.Finance
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -22,7 +23,12 @@ class DataReply(private val db: AppDb) {
         val isQuestion = Regex("(gi|nao|bao nhieu|may|chua|khong|ko|xem|liet ke|kiem tra|danh sach|con)\\b").containsMatchIn(t)
         if (!isQuestion) return null
 
+        // "giỗ" bỏ dấu thành "gio", trùng với "giờ", nên xét trên chữ có dấu
+        val raw = text.lowercase()
         return when {
+            Regex("(giỗ|dỗ|sinh nhật|kỷ niệm|kỉ niệm|ngày quan trọng|ngày cưới)").containsMatchIn(raw) &&
+                Regex("(sap toi|ngay may|hom nao|khi nao|bao gio|ngay nao|nhung ngay|co gi|ai khong|danh sach|xem|liet ke|nao)").containsMatchIn(t) ->
+                dates(you)
             Regex("(khoan chi|khoan phai tra|phai tra|can tra|tien nha|tra no|no nan|chi tieu|so chi|het han|qua han|den han)").containsMatchIn(t) ->
                 finance(you)
             Regex("(nhac nho|loi nhac|lich nhac|co lich|lich hen|viec can lam)").containsMatchIn(t) ->
@@ -48,6 +54,14 @@ class DataReply(private val db: AppDb) {
         val unpaid = list.filter { it.payment == null }.sumOf { it.ob.amount }
         val tail = if (unpaid > 0) "\nCòn phải trả tháng này: ${Finance.money(unpaid)}." else "\nTháng này $you đã trả hết rồi 👏"
         return "Sổ chi tháng ${Finance.thisMonth()}:\n" + lines.joinToString("\n") + tail
+    }
+
+    private suspend fun dates(you: String): String {
+        val d = Dates(db)
+        val list = d.upcoming()
+        if (list.isEmpty()) return "Sổ ngày quan trọng của $you đang trống. Kể mình nghe ngày giỗ, sinh nhật, kỷ niệm " +
+            "(ví dụ \"giỗ ông nội mùng 10 tháng 3 âm\") là năm nào mình cũng tự nhắc trước."
+        return "Các ngày quan trọng sắp tới:\n" + list.take(10).joinToString("\n") { "• ${d.line(it)}" }
     }
 
     private suspend fun reminders(you: String): String {

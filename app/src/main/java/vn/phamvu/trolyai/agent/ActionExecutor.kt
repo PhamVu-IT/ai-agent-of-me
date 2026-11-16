@@ -7,6 +7,7 @@ import android.provider.AlarmClock
 import vn.phamvu.trolyai.data.AppDb
 import vn.phamvu.trolyai.data.Memory
 import vn.phamvu.trolyai.data.Reminder
+import vn.phamvu.trolyai.dates.Dates
 import vn.phamvu.trolyai.finance.Finance
 import vn.phamvu.trolyai.learn.Profile
 import vn.phamvu.trolyai.reminder.ReminderScheduler
@@ -36,8 +37,24 @@ class ActionExecutor(private val ctx: Context, private val db: AppDb) {
 
     private suspend fun execute(a: Action): String = when (a.type) {
         "remember" -> {
-            db.memories().insert(Memory(content = a.args.getString("content")))
-            "Đã ghi nhớ."
+            val content = a.args.getString("content")
+            db.memories().insert(Memory(content = content))
+            // Điều vừa nhớ có ngày giỗ / sinh nhật / kỷ niệm thì đưa luôn vào sổ để năm nào cũng tự nhắc
+            Dates(db).let { d -> d.confirmation(d.captureFrom(content, "ai")) } ?: "Đã ghi nhớ."
+        }
+        "add_event" -> {
+            val kind = a.args.optString("kind").takeIf { k -> Dates.kinds.any { it.first == k } } ?: "khac"
+            val d = Dates(db)
+            val added = d.add(
+                title = a.args.getString("title"),
+                day = a.args.getInt("day"),
+                month = a.args.getInt("month"),
+                year = a.args.optInt("year", 0).takeIf { it in 1900..2200 },
+                lunar = a.args.optBoolean("lunar", kind == "gio"),
+                kind = kind,
+                source = "ai",
+            )
+            d.confirmation(listOfNotNull(added)) ?: "Ngày này đã có trong sổ Ngày quan trọng rồi."
         }
         "learn_rule" -> {
             db.memories().insert(Memory(content = a.args.getString("rule"), kind = "rule"))

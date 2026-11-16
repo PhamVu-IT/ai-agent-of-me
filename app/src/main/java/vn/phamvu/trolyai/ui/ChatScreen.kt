@@ -66,6 +66,7 @@ fun ChatScreen(
     onPickModel: () -> Unit,
     onModels: () -> Unit,
     onStats: () -> Unit,
+    onDates: () -> Unit = {},
 ) {
     var input by remember { mutableStateOf("") }
     val progress = vm.importProgress.value
@@ -107,6 +108,7 @@ fun ChatScreen(
             onInterview = onInterview,
             onModels = onModels,
             onStats = onStats,
+            onDates = onDates,
         )
         if (!vm.modelReady.value || progress != null || vm.importNote.value.isNotEmpty()) {
             Box(Modifier.padding(horizontal = 12.dp)) {
@@ -181,6 +183,7 @@ private fun ChatTopBar(
     onInterview: () -> Unit,
     onModels: () -> Unit,
     onStats: () -> Unit,
+    onDates: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
@@ -203,6 +206,7 @@ private fun ChatTopBar(
             Box {
                 TextButton(onClick = { menu = true }) { Text("⋮", fontSize = 20.sp) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text("📅 Ngày quan trọng") }, onClick = { menu = false; onDates() })
                     DropdownMenuItem(text = { Text("📊 Thống kê") }, onClick = { menu = false; onStats() })
                     DropdownMenuItem(text = { Text("🧠 Mô hình") }, onClick = { menu = false; onModels() })
                     DropdownMenuItem(text = { Text("🎙️ Giọng của tôi") }, onClick = { menu = false; onVoiceSetup() })

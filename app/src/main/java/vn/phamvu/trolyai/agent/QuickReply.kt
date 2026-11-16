@@ -1,6 +1,8 @@
 package vn.phamvu.trolyai.agent
 
 import vn.phamvu.trolyai.finance.Finance
+import vn.phamvu.trolyai.dates.Anniversary
+import java.time.LocalDate
 import java.util.Calendar
 
 /**
@@ -17,8 +19,11 @@ object QuickReply {
         // Câu có ý nhờ làm việc thì để AI xử lý
         if (Regex("\\b(nhac|bao thuc|dat|hen|goi|nhan|ghi|mo)\\b").containsMatchIn(t)) return null
 
+        // Hỏi về giỗ, sinh nhật, kỷ niệm ("giỗ ông ngày mấy") thì để tầng dữ liệu tra sổ Ngày quan trọng
+        if (Regex("(giỗ|dỗ|sinh nhật|kỷ niệm|kỉ niệm|ngày cưới)").containsMatchIn(text.lowercase())) return null
+
         val Self = self.replaceFirstChar { it.uppercase() }
-        val asksDate = Regex("(ngay (may|bao nhieu|gi)|ngay thang|bua nay ngay|hom nay la ngay|^hom nay ngay|today|what date)").containsMatchIn(t)
+        val asksDate = Regex("(ngay (may|bao nhieu|gi)|ngay thang|bua nay ngay|hom nay la ngay|^hom nay ngay|today|what date|am lich|ngay am|bao nhieu am|mung may)").containsMatchIn(t)
         val asksWeekday = Regex("(thu may|thu gi|hom nay thu|what day)").containsMatchIn(t)
         val asksTime = Regex("(may gio|gio la may|bay gio la|what time)").containsMatchIn(t)
         val asksMonthYear = !asksDate && Regex("(thang may|thang bao nhieu|nam may|nam bao nhieu|nam nay la nam)").containsMatchIn(t)
@@ -27,7 +32,8 @@ object QuickReply {
             val parts = mutableListOf<String>()
             if (asksTime) parts += "Bây giờ là %d giờ %02d phút".format(now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE))
             if (asksDate || asksWeekday) parts += "Hôm nay là ${weekday(now)}, ngày ${now.get(Calendar.DAY_OF_MONTH)} " +
-                "tháng ${now.get(Calendar.MONTH) + 1} năm ${now.get(Calendar.YEAR)}"
+                "tháng ${now.get(Calendar.MONTH) + 1} năm ${now.get(Calendar.YEAR)}, tức " +
+                Anniversary.lunarToday(LocalDate.of(now.get(Calendar.YEAR), now.get(Calendar.MONTH) + 1, now.get(Calendar.DAY_OF_MONTH)))
             else if (asksMonthYear) parts += "Bây giờ là tháng ${now.get(Calendar.MONTH) + 1} năm ${now.get(Calendar.YEAR)}"
             return parts.joinToString(". ") + "."
         }
