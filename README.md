@@ -259,6 +259,18 @@ Mở ⋮ › 🎧 Chép lời ghi âm, chọn file (mp3, m4a, ogg, wav… cả p
 
 App cắt bản ghi thành từng đoạn khoảng 25 giây (cắt ở chỗ im nhất để khỏi đứt chữ), bản chép hiện dần kèm mốc thời gian, có nút chép và chia sẻ. Mọi thứ chạy trong máy.
 
+## 📥 Tải mô hình trong app và 📏 đo tốc độ
+
+Vào ⋮ › 🧠 Mô hình › **📥 Tải mô hình AI và đo tốc độ**:
+
+- Danh sách mô hình lấy từ Google AI Edge Gallery: Gemma 4 E2B / E4B, Gemma 3n E2B / E4B, Gemma 3 1B, Qwen 2.5 1.5B và DeepSeek R1 1.5B. Mỗi mô hình ghi rõ dung lượng, RAM cần có, và có hiểu ảnh, âm thanh hay có chế độ suy nghĩ không. Mô hình nặng hơn RAM của máy thì có cảnh báo.
+- Bấm **Tải về** là app tải thẳng từ Hugging Face, đúng phiên bản Gallery đã thử. Việc tải chạy ở nền và có thông báo tiến độ. Mất mạng thì app tải tiếp từ chỗ đang dở. Tải xong, app tự thay mô hình đang dùng.
+- Mô hình đánh dấu 🔑 cần một bước chuẩn bị:
+  1. Đăng nhập huggingface.co và bấm đồng ý điều khoản ở trang của mô hình.
+  2. Tạo mã truy cập (Access Token) loại Read.
+  3. Dán mã vào app. Mã chỉ lưu trong máy.
+- **📏 Đo tốc độ**: mô hình đang dùng tóm tắt một đoạn văn cố định 3 lần. Kết quả cho biết tốc độ viết (token/giây), thời gian tới chữ đầu tiên, tốc độ đọc đề và thời gian nạp. Đổi GPU / CPU ở ⚙️ Cài đặt rồi đo lại để so sánh.
+
 ## Bảo mật
 
 - **Khoá app:** mở app phải xác nhận vân tay, khuôn mặt hoặc mã PIN của máy. Rời app quá 1 phút thì khoá lại.

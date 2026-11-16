@@ -15,6 +15,8 @@
     <!-- Chế độ phỏng vấn: nghe ở nền và hiện ô gợi ý nổi trên ứng dụng khác -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Tải mô hình vài GB ở nền (WorkManager), có thông báo tiến độ -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- Cho phép hỏi Android xem có app nào mở được intent -->
@@ -98,6 +100,11 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Dịch vụ nền của WorkManager dùng khi tải mô hình; Android 14 đòi khai báo loại "dataSync" -->
+        <service android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
 
         <service android:name=".interview.InterviewService"
             android:exported="false"

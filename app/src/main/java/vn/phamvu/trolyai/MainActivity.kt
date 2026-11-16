@@ -41,6 +41,8 @@ import vn.phamvu.trolyai.security.BiometricAuthenticator
 import vn.phamvu.trolyai.security.VoiceThenBiometric
 import vn.phamvu.trolyai.ui.AppTheme
 import vn.phamvu.trolyai.ui.ChatScreen
+import vn.phamvu.trolyai.models.ModelStoreScreen
+import vn.phamvu.trolyai.models.ModelStoreViewModel
 import vn.phamvu.trolyai.scribe.ScribeScreen
 import vn.phamvu.trolyai.scribe.ScribeViewModel
 import vn.phamvu.trolyai.ui.SettingsScreen
@@ -54,6 +56,8 @@ class MainActivity : FragmentActivity() {
     private val vm: ChatViewModel by viewModels()
     /** Chỉ tạo khi mở màn 🎧 Chép lời. */
     private val scribe: ScribeViewModel by viewModels()
+    /** Chỉ tạo khi mở màn 📥 Tải mô hình. */
+    private val store: ModelStoreViewModel by viewModels()
     private var tts: TextToSpeech? = null
     /** Tên các giọng tiếng Việt có trong máy, cho màn ⚙️ Cài đặt. */
     private val ttsVoices = mutableStateOf<List<String>>(emptyList())
@@ -77,7 +81,7 @@ class MainActivity : FragmentActivity() {
     private var backgroundSince = 0L
     private var authenticating = false // màn hình nhập PIN làm app tạm ẩn, tránh hỏi lại hai lần
 
-    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh", "thongke", "skill", "caidat" hoặc "cheploi"
+    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh", "thongke", "skill", "caidat", "cheploi" hoặc "taimohinh"
     private val voicePrompt = mutableStateOf<String?>(null) // dòng chữ khi đang nghe để nhận giọng
 
     // Nghe tiếng Việt ngay trong app (ưu tiên mô hình offline), không mở hộp thoại "Voice search" của Google
@@ -197,7 +201,10 @@ class MainActivity : FragmentActivity() {
                         !unlocked.value -> LockedScreen(noLockSet = !auth.isAvailable(), onUnlock = ::unlock)
                         screen.value == "giong" -> VoiceEnrollScreen(voice, vm, pickers, onDone = { screen.value = "chat" })
                         screen.value == "phongvan" -> InterviewScreen(vm, pickers, onBack = { screen.value = "chat" })
-                        screen.value == "mohinh" -> ModelsScreen(vm, pickers, onBack = { screen.value = "chat" })
+                        screen.value == "mohinh" -> ModelsScreen(vm, pickers, onStore = { screen.value = "taimohinh" },
+                            onBack = { screen.value = "chat" })
+                        screen.value == "taimohinh" -> ModelStoreScreen(store.also { it.onInstalled = vm::refreshModel },
+                            onBack = { screen.value = "mohinh" })
                         screen.value == "thongke" -> StatsScreen(vm, onBack = { screen.value = "chat" })
                         screen.value == "skill" -> SkillsScreen(vm,
                             onImportFolder = { pickingFile = true; pickSkillFolder.launch(null) },

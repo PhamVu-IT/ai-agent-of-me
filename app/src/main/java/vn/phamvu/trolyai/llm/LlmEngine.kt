@@ -338,16 +338,31 @@ class OfflineLlm(private val context: Context) : LlmEngine {
             throw e
         }
         onProgress(1f)
-        // Đợi câu đang trả lời (nếu có) xong rồi mới thay mô hình. Xoá cả hai loại file cũ để
-        // chỉ còn một mô hình (mỗi file vài GB) và không nhầm file nào đang dùng.
-        lock.withLock {
-            runner?.close()
-            runner = null
-            backend = ""
-            ModelFormat.entries.forEach { fileFor(it).delete() }
-            if (!tmp.renameTo(fileFor(newFormat))) { tmp.delete(); throw IOException("Không thay được file mô hình") }
-            withContext(Dispatchers.Default) { ensureLoaded() }
-        }
+        installModel(tmp, newFormat)
+    }
+
+    /** Chỗ để file đang tải về từ Hugging Face (tải tiếp được nếu bị ngắt), cùng thư mục với mô hình. */
+    fun downloadFile(): File {
+        val dir = dir ?: throw IOException("Không tìm thấy bộ nhớ của app")
+        dir.mkdirs()
+        return File(dir, "model.download.tmp")
+    }
+
+    /** Bộ nhớ trống ở chỗ lưu mô hình (byte). */
+    fun freeSpace(): Long = dir?.usableSpace ?: 0L
+
+    /**
+     * Thay mô hình đang dùng bằng file [tmp] (đã chép hoặc tải xong) rồi nạp luôn.
+     * Đợi câu đang trả lời (nếu có) xong rồi mới thay. Xoá cả hai loại file cũ để chỉ còn một mô hình
+     * (mỗi file vài GB) và không nhầm file nào đang dùng.
+     */
+    suspend fun installModel(tmp: File, newFormat: ModelFormat) = lock.withLock {
+        runner?.close()
+        runner = null
+        backend = ""
+        ModelFormat.entries.forEach { fileFor(it).delete() }
+        if (!tmp.renameTo(fileFor(newFormat))) { tmp.delete(); throw IOException("Không thay được file mô hình") }
+        withContext(Dispatchers.Default) { ensureLoaded() }
     }
 }
 

@@ -122,7 +122,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val importNote = mutableStateOf("")
     private var importJob: Job? = null
 
-    fun refreshModel() { modelReady.value = llm.hasModel() }
+    fun refreshModel() { modelReady.value = llm.hasModel(); backendLabel.value = llm.backend }
 
     /** Ví dụ "model.litertlm, 2584 MB, LiteRT-LM" để biết đang dùng mô hình nào. */
     fun modelLabel(): String = "${llm.modelFile.name}, ${llm.modelSizeMb()} MB, ${llm.format.label}"
