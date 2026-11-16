@@ -40,14 +40,32 @@ class MediaPipeEngine(private val context: Context) : LlmEngine {
     private fun ensureLoaded(): LlmInference {
         llm?.let { return it }
         require(hasModel()) { "Chưa có mô hình. Bấm \"🧠 Mô hình\" để chọn file .task trong máy, hoặc chép vào ${modelFile.absolutePath}" }
-        val opts = LlmInference.LlmInferenceOptions.builder()
+        fun build(b: LlmInference.Backend) = LlmInference.LlmInferenceOptions.builder()
             .setModelPath(modelFile.absolutePath)
             .setMaxTokens(4096) // tổng chữ vào + ra; đủ chỗ cho hồ sơ, quy tắc và trí nhớ
-            // Chạy trên GPU (Adreno của Snapdragon): nhanh hơn và mát máy hơn CPU
-            .setPreferredBackend(LlmInference.Backend.GPU)
+            .setPreferredBackend(b)
             .build()
-        return LlmInference.createFromOptions(context, opts).also { llm = it }
+        val t0 = System.currentTimeMillis()
+        // Ưu tiên GPU (Adreno của Snapdragon): nhanh hơn và mát máy hơn CPU.
+        // Máy hay mô hình không chạy được GPU thì lùi về CPU thay vì báo lỗi.
+        val engine = try {
+            LlmInference.createFromOptions(context, build(LlmInference.Backend.GPU)).also { backend = "GPU" }
+        } catch (e: Throwable) {
+            if (e is OutOfMemoryError) throw e
+            LlmInference.createFromOptions(context, build(LlmInference.Backend.CPU)).also { backend = "CPU (GPU lỗi: ${e.message?.take(60)})" }
+        }
+        loadMs = System.currentTimeMillis() - t0
+        return engine.also { llm = it }
     }
+
+    /** Mô hình đang chạy trên GPU hay CPU, để hiện cho người dùng biết vì sao chậm. */
+    @Volatile var backend: String = ""
+        private set
+    /** Thời gian nạp mô hình lần gần nhất (ms). */
+    @Volatile var loadMs: Long = 0
+        private set
+    /** Dung lượng file mô hình (MB). */
+    fun modelSizeMb(): Long = if (hasModel()) modelFile.length() / 1_000_000 else 0
 
     override suspend fun generate(prompt: String): String = lock.withLock {
         withContext(Dispatchers.Default) { ensureLoaded().generateResponse(prompt) }

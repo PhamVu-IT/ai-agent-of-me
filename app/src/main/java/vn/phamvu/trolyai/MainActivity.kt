@@ -375,6 +375,8 @@ fun ChatScreen(
             LinearProgressIndicator(Modifier.fillMaxWidth())
             if (vm.status.value.isNotEmpty()) Text(vm.status.value, style = MaterialTheme.typography.bodySmall)
         }
+        else if (vm.timing.value.isNotEmpty()) Text(vm.timing.value, style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(input, { input = it }, Modifier.weight(1f), placeholder = { Text("Nhắn cho trợ lý…") })
             TextButton(onClick = onMic) { Text("🎤") }
