@@ -214,9 +214,10 @@ class MainActivity : FragmentActivity() {
         tts?.stop() // không để trợ lý tự nghe tiếng mình đang đọc
         micError.value = false
         micPrompt.value = "🎤 Đang chuẩn bị…"
+        val t0 = System.currentTimeMillis()
         speech.start(object : VietnameseSpeech.Callback {
             override fun onListening(text: String) { micError.value = false; micPrompt.value = text }
-            override fun onResult(text: String) { micPrompt.value = null; vm.send(text) }
+            override fun onResult(text: String) { micPrompt.value = null; vm.send(text, voiceMs = System.currentTimeMillis() - t0) }
             override fun onEnd(message: String?) {
                 if (message == null || !manual) { micPrompt.value = null; return }
                 micError.value = true

@@ -62,11 +62,11 @@ class VietnameseAsr(ctx: Context) : AsrModelFiles(ctx, "asr-vi", "nghe tiếng V
     fun release() { cached?.release(); cached = null }
 
     /**
-     * Thu âm một câu: chờ bạn bắt đầu nói (tối đa [waitMs]), dừng khi im lặng khoảng 1 giây hoặc sau [maxMs].
+     * Thu âm một câu: chờ bạn bắt đầu nói (tối đa [waitMs]), dừng khi im lặng khoảng 0,7 giây hoặc sau [maxMs].
      * Trả về âm thanh 16 kHz, hoặc null nếu không nghe thấy ai nói. Chạy trên luồng nền.
      */
     @SuppressLint("MissingPermission") // người gọi đã kiểm tra quyền micro
-    suspend fun record(onSpeechStart: () -> Unit, waitMs: Int = 7_000, maxMs: Int = 15_000): FloatArray? {
+    suspend fun record(onSpeechStart: () -> Unit, waitMs: Int = 7_000, maxMs: Int = 10_000): FloatArray? {
         val rate = SAMPLE_RATE
         val minBuf = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val rec = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, rate,
@@ -78,6 +78,7 @@ class VietnameseAsr(ctx: Context) : AsrModelFiles(ctx, "asr-vi", "nghe tiếng V
         var frames = 0
         var started = false
         var silentMs = 0
+        var peak = 0f           // mức to nhất của giọng nói
         var elapsedMs = 0
         try {
             rec.startRecording()
@@ -103,8 +104,13 @@ class VietnameseAsr(ctx: Context) : AsrModelFiles(ctx, "asr-vi", "nghe tiếng V
                     }
                 } else {
                     chunks += chunk
-                    silentMs = if (rms > maxOf(0.01f, noise * 2f)) 0 else silentMs + ms
-                    if (silentMs >= 1_000 || elapsedMs >= maxMs) break
+                    // Mức to nhất khi nói (giảm dần để theo kịp giọng nhỏ lại). Coi là im lặng khi tiếng
+                    // nhỏ hơn hẳn giọng nói, không chỉ so với ồn nền: phòng có quạt, điều hoà hay xe cộ
+                    // thì ồn nền luôn cao hơn ngưỡng cũ nên trước đây phải thu đủ 15 giây mới dừng.
+                    peak = maxOf(rms, peak * 0.995f)
+                    val quiet = maxOf(0.01f, noise * 2f, peak * 0.18f)
+                    silentMs = if (rms > quiet) 0 else silentMs + ms
+                    if (silentMs >= 700 || elapsedMs >= maxMs) break
                 }
             }
         } finally {

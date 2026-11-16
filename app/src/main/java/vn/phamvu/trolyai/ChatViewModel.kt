@@ -172,7 +172,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun send(text: String) {
+    /** [voiceMs] là thời gian nghe và nhận dạng giọng nói (nếu nói bằng 🎤), để hiện trong dòng thời gian. */
+    fun send(text: String, voiceMs: Long = 0) {
         if (text.isBlank() || thinking.value) return
         viewModelScope.launch {
             add(ChatMessage(fromUser = true, text = text))
@@ -191,7 +192,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     status.value = "Đang viết…"
                 }
                 val total = System.currentTimeMillis() - t0
-                timing.value = when (turn.tier) {
+                val voice = if (voiceMs > 0) "🎤 nghe + nhận dạng ${sec(voiceMs)} · " else ""
+                timing.value = voice + when (turn.tier) {
                     Tier.QUICK -> "⏱ ${sec(total)} · trả lời nhanh, không dùng AI"
                     Tier.DATA -> "⏱ ${sec(total)} · đọc dữ liệu trong máy, không dùng AI"
                     Tier.LLM -> buildString {
