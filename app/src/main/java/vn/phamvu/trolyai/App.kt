@@ -3,7 +3,12 @@ package vn.phamvu.trolyai
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import vn.phamvu.trolyai.data.AppDb
+import vn.phamvu.trolyai.dates.DailyBrief
+import vn.phamvu.trolyai.dates.Dates
 import vn.phamvu.trolyai.finance.FinanceAlarms
 import vn.phamvu.trolyai.learn.LearnWorker
 import vn.phamvu.trolyai.llm.OfflineLlm
@@ -27,6 +32,13 @@ class App : Application() {
         )
         FinanceAlarms.scheduleDaily(this)
         LearnWorker.schedule(this)
+        // Đặt bản tin sáng và tìm lại ngày giỗ / sinh nhật bạn đã kể từ trước (chạy nền, không làm chậm lúc mở app)
+        CoroutineScope(Dispatchers.IO).launch {
+            runCatching {
+                Dates(db).scanOld()
+                DailyBrief.scheduleNext(this@App, db)
+            }
+        }
     }
 
     companion object {

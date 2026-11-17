@@ -92,6 +92,30 @@ data class InterviewProfile(
     val updatedAt: Long = System.currentTimeMillis(),
 )
 
+/**
+ * Ngày quan trọng lặp lại hằng năm: giỗ, sinh nhật, kỷ niệm. Trợ lý tự nhắc trước vài ngày và đúng ngày,
+ * không cần bạn hỏi.
+ */
+@Entity
+data class ImportantDate(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val title: String,
+    val day: Int,
+    val month: Int,
+    /** Năm gốc (năm sinh, năm cưới, năm mất) nếu biết, để nói "tròn 10 năm". */
+    val year: Int? = null,
+    /** true = ngày tháng âm lịch. */
+    val lunar: Boolean = false,
+    /** "gio", "sinh_nhat", "ky_niem" hoặc "khac" */
+    val kind: String = "khac",
+    /** Nhắc trước bao nhiêu ngày (ngoài ngày mai và đúng ngày). */
+    val remindDaysBefore: Int = 3,
+    val note: String = "",
+    /** "tu_them" (bạn thêm ở màn hình), "ai" (lưu khi bạn kể), "quet" (tìm thấy trong trí nhớ / tin nhắn cũ) */
+    val source: String = "tu_them",
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
 @Dao
 interface MemoryDao {
     @Insert suspend fun insert(m: Memory): Long
@@ -140,6 +164,14 @@ interface SettingDao {
 }
 
 @Dao
+interface DateDao {
+    @Insert suspend fun insert(d: ImportantDate): Long
+    @Update suspend fun update(d: ImportantDate)
+    @Query("DELETE FROM ImportantDate WHERE id = :id") suspend fun delete(id: Long)
+    @Query("SELECT * FROM ImportantDate ORDER BY month, day") suspend fun all(): List<ImportantDate>
+}
+
+@Dao
 interface VoiceDao {
     @Upsert suspend fun save(v: VoiceProfile)
     @Query("SELECT * FROM VoiceProfile WHERE id = 1") suspend fun get(): VoiceProfile?
@@ -153,8 +185,8 @@ interface InterviewDao {
 
 @Database(
     entities = [Memory::class, Reminder::class, ChatMessage::class, Obligation::class,
-        Payment::class, BankTxn::class, VoiceProfile::class, InterviewProfile::class, Setting::class],
-    version = 3,
+        Payment::class, BankTxn::class, VoiceProfile::class, InterviewProfile::class, Setting::class, ImportantDate::class],
+    version = 4,
 )
 abstract class AppDb : RoomDatabase() {
     abstract fun memories(): MemoryDao
@@ -164,6 +196,7 @@ abstract class AppDb : RoomDatabase() {
     abstract fun voice(): VoiceDao
     abstract fun settings(): SettingDao
     abstract fun interview(): InterviewDao
+    abstract fun dates(): DateDao
 
     companion object {
         /** Bản 2 thêm bảng hồ sơ phỏng vấn; giữ nguyên dữ liệu cũ. */
@@ -183,6 +216,16 @@ abstract class AppDb : RoomDatabase() {
             }
         }
 
+        /** Bản 4: bảng ngày quan trọng (giỗ, sinh nhật, kỷ niệm). Giữ nguyên dữ liệu cũ. */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `ImportantDate` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`title` TEXT NOT NULL, `day` INTEGER NOT NULL, `month` INTEGER NOT NULL, `year` INTEGER, " +
+                    "`lunar` INTEGER NOT NULL, `kind` TEXT NOT NULL, `remindDaysBefore` INTEGER NOT NULL, " +
+                    "`note` TEXT NOT NULL, `source` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)")
+            }
+        }
+
         @Volatile private var inst: AppDb? = null
         fun get(ctx: Context): AppDb = inst ?: synchronized(this) {
             inst ?: run {
@@ -190,7 +233,7 @@ abstract class AppDb : RoomDatabase() {
                 // Toàn bộ file dữ liệu được mã hoá AES-256 bằng SQLCipher
                 Room.databaseBuilder(ctx.applicationContext, AppDb::class.java, "trolyai-secure.db")
                     .openHelperFactory(SupportOpenHelperFactory(DbKey.passphrase(ctx)))
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .build()
             }.also { inst = it }
         }

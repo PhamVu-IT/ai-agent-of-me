@@ -1,4 +1,5 @@
 import java.util.zip.ZipFile
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
@@ -24,22 +25,25 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
     // LiteRT-LM và MediaPipe có thể cùng mang một thư viện C++; giữ một bản để không lỗi khi đóng gói
     packaging { jniLibs { pickFirsts += "**/liblitertlm_jni.so" } }
 }
 
+// Kotlin 2.2 không còn cho dùng kotlinOptions trong khối android {}
+kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
+
 dependencies {
     // Mô hình AI chạy hoàn toàn trên máy (MediaPipe LLM Inference)
     implementation("com.google.mediapipe:tasks-genai:0.10.24")
-    // Mô hình .litertlm (ví dụ Gemma 4 E2B) chạy bằng LiteRT-LM. Giữ bản 0.10.x vì đã chạy được Gemma 4 và
-    // hợp với Kotlin 2.0 của dự án. Bản 0.16 trở lên cần nâng Kotlin lên 2.2/2.3 trước.
+    // Mô hình .litertlm (ví dụ Gemma 4 E2B) chạy bằng LiteRT-LM. Bản 0.10.2 được build bằng Kotlin 2.3 nên
+    // dự án cần Kotlin 2.2 trở lên (xem build.gradle.kts ở thư mục gốc), nếu không sẽ báo lỗi
+    // "Module was compiled with an incompatible version of Kotlin".
     implementation("com.google.ai.edge.litertlm:litertlm-android:0.10.2")
 
     // Lưu trí nhớ, nhắc nhở, lịch sử chat
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
+    implementation("androidx.room:room-runtime:2.7.2")
+    implementation("androidx.room:room-ktx:2.7.2")
+    ksp("androidx.room:room-compiler:2.7.2")
 
     // Giao diện
     implementation(platform("androidx.compose:compose-bom:2024.10.01"))
@@ -58,6 +62,9 @@ dependencies {
     // Mã hoá cơ sở dữ liệu
     implementation("net.zetetic:sqlcipher-android:4.6.1")
     implementation("androidx.sqlite:sqlite-ktx:2.4.0")
+
+    // Kiểm thử phần đổi âm lịch và tìm ngày giỗ (chạy trên máy tính: ./gradlew testDebugUnitTest)
+    testImplementation("junit:junit:4.13.2")
 
     // Giải nén mô hình nghe tiếng Anh (.tar.bz2 tải từ sherpa-onnx) ngay trong app
     implementation("org.apache.commons:commons-compress:1.27.1")

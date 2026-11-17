@@ -80,6 +80,7 @@ fun ChatScreen(
     onTeacher: () -> Unit,
     onPickImage: () -> Unit,
     onTakePhoto: () -> Unit,
+    onDates: () -> Unit = {},
 ) {
     var input by remember { mutableStateOf("") }
     val progress = vm.importProgress.value
@@ -126,6 +127,7 @@ fun ChatScreen(
             onScribe = onScribe,
             onPhotos = onPhotos,
             onTeacher = onTeacher,
+            onDates = onDates,
         )
         if (!vm.modelReady.value || progress != null || vm.importNote.value.isNotEmpty()) {
             Box(Modifier.padding(horizontal = 12.dp)) {
@@ -175,7 +177,7 @@ fun ChatScreen(
             }
             // Đang cuộn lên đọc tin cũ: nút nhỏ để về cuối cuộc trò chuyện
             val away by remember { derivedStateOf { list.firstVisibleItemIndex > 1 } }
-            AnimatedVisibility(away, Modifier.align(Alignment.BottomCenter).padding(8.dp), enter = fadeIn(), exit = fadeOut()) {
+            androidx.compose.animation.AnimatedVisibility(away, Modifier.align(Alignment.BottomCenter).padding(8.dp), enter = fadeIn(), exit = fadeOut()) {
                 SmallFloatingActionButton(onClick = { scope.launch { list.animateScrollToItem(0) } }) { Text("↓") }
             }
         }
@@ -228,6 +230,7 @@ private fun ChatTopBar(
     onScribe: () -> Unit,
     onPhotos: () -> Unit,
     onTeacher: () -> Unit,
+    onDates: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
@@ -250,6 +253,7 @@ private fun ChatTopBar(
             Box {
                 TextButton(onClick = { menu = true }) { Text("⋮", fontSize = 20.sp) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text("📅 Ngày quan trọng") }, onClick = { menu = false; onDates() })
                     DropdownMenuItem(text = { Text("📊 Thống kê") }, onClick = { menu = false; onStats() })
                     DropdownMenuItem(text = { Text("🖼️ Tìm ảnh") }, onClick = { menu = false; onPhotos() })
                     DropdownMenuItem(text = { Text("📸 Học ngoại ngữ") }, onClick = { menu = false; onTeacher() })

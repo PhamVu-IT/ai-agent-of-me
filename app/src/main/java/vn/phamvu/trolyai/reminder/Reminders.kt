@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import vn.phamvu.trolyai.App
 import vn.phamvu.trolyai.R
+import vn.phamvu.trolyai.dates.DailyBrief
 import vn.phamvu.trolyai.finance.FinanceAlarms
 
 object ReminderScheduler {
@@ -51,10 +52,10 @@ class ReminderReceiver : BroadcastReceiver() {
     }
 }
 
-/** Android xoá mọi báo thức khi khởi động lại máy, nên đặt lại từ cơ sở dữ liệu. */
+/** Android xoá mọi báo thức khi khởi động lại máy (và khi cập nhật app), nên đặt lại từ cơ sở dữ liệu. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         FinanceAlarms.scheduleDaily(ctx)
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
@@ -62,6 +63,7 @@ class BootReceiver : BroadcastReceiver() {
             db.reminders().upcoming(System.currentTimeMillis()).forEach {
                 ReminderScheduler.schedule(ctx, it.id, it.text, it.triggerAt)
             }
+            DailyBrief.scheduleNext(ctx, db)
             pending.finish()
         }
     }

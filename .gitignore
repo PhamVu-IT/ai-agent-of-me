@@ -7,3 +7,4 @@ app/libs/*.aar
 *.task
 *.onnx
 .DS_Store
+.kotlin/

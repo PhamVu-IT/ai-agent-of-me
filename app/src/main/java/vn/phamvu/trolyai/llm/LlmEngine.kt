@@ -291,7 +291,7 @@ class OfflineLlm(private val context: Context) : LlmEngine {
      * qua [onProgress]. Chép ra file tạm trước, xong mới thay file cũ, nên nếu hỏng giữa chừng thì mô hình cũ
      * vẫn dùng được.
      */
-    suspend fun importModel(uri: Uri, onProgress: (Float) -> Unit) = withContext(Dispatchers.IO) {
+    suspend fun importModel(uri: Uri, onProgress: (Float) -> Unit): Unit = withContext(Dispatchers.IO) {
         val cr = context.contentResolver
         var name = ""
         var size = -1L
@@ -361,7 +361,7 @@ class OfflineLlm(private val context: Context) : LlmEngine {
      * Đợi câu đang trả lời (nếu có) xong rồi mới thay. Xoá cả hai loại file cũ để chỉ còn một mô hình
      * (mỗi file vài GB) và không nhầm file nào đang dùng.
      */
-    suspend fun installModel(tmp: File, newFormat: ModelFormat) = lock.withLock {
+    suspend fun installModel(tmp: File, newFormat: ModelFormat): Unit = lock.withLock {
         runner?.close()
         runner = null
         backend = ""
