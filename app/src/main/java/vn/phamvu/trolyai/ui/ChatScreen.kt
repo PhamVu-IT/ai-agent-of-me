@@ -177,7 +177,7 @@ fun ChatScreen(
             }
             // Đang cuộn lên đọc tin cũ: nút nhỏ để về cuối cuộc trò chuyện
             val away by remember { derivedStateOf { list.firstVisibleItemIndex > 1 } }
-            AnimatedVisibility(away, Modifier.align(Alignment.BottomCenter).padding(8.dp), enter = fadeIn(), exit = fadeOut()) {
+            androidx.compose.animation.AnimatedVisibility(away, Modifier.align(Alignment.BottomCenter).padding(8.dp), enter = fadeIn(), exit = fadeOut()) {
                 SmallFloatingActionButton(onClick = { scope.launch { list.animateScrollToItem(0) } }) { Text("↓") }
             }
         }

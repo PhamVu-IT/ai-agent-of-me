@@ -299,10 +299,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         mediaNote.value = ""
         viewModelScope.launch {
             try {
-                val pcm = ChatMedia.record({ stopRecording }) { ms, level ->
+                val pcm = ChatMedia.record({ stopRecording }, onProgress = { ms, level ->
                     recordMs.longValue = ms
                     recordLevel.floatValue = level
-                }
+                })
                 if (!recordCancelled && ChatMedia.durationMs(pcm) >= 500) attachedAudio.value = pcm
             } catch (e: CancellationException) {
                 throw e
