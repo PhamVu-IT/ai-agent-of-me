@@ -222,6 +222,88 @@ Mô hình nào vẫn quen trả JSON kiểu cũ thì app vẫn hiểu.
 
 File `ui/MessageBubbleShape.kt` lấy từ Gallery (Apache License 2.0, giữ nguyên ghi chú bản quyền của Google).
 
+## Agent Skills và MCP (như Google AI Edge Gallery)
+
+Menu ⋮ → **🧩 Skill & MCP**. Trợ lý thấy tên và mô tả của các skill / công cụ đang bật; khi cần thì tự gọi,
+app chạy rồi đưa kết quả lại để trợ lý trả lời tiếp (tối đa 4 bước mỗi câu).
+
+- **Skill có sẵn** (lấy từ Gallery, Apache License 2.0, trong `app/src/main/assets/skills/`): tra Wikipedia
+  (`query-wikipedia`), bản đồ (`interactive-map`, hiện ngay trong chat), tạo mã QR (`qr-code`, hiện ảnh), gửi email
+  (`send-email`, mở app email để bạn tự bấm gửi).
+- **Thêm skill**: từ đường link tới thư mục skill (có `SKILL.md`), hoặc chọn thư mục skill trong máy. Định dạng giống hệt
+  Gallery: `SKILL.md` (phần đầu `name`, `description`) và tuỳ chọn `scripts/index.html` có hàm
+  `window.ai_edge_gallery_get_result(data, secret)`. Skill cần khoá bí mật (`require-secret: true`) thì nhập khoá ở màn này.
+- **Máy chủ MCP**: thêm link Streamable HTTP (thường kết thúc bằng `/mcp`), kèm một header xác thực nếu cần
+  (ví dụ `X-Goog-Api-Key`). App tự lấy danh sách công cụ; bật / tắt từng công cụ. Mô hình nhỏ chỉ có 4096 token,
+  nên chỉ bật những công cụ bạn cần.
+- App có quyền Internet nhưng chỉ dùng khi một skill hay máy chủ MCP cần; trò chuyện thường vẫn chạy offline.
+
+## ⚙️ Cài đặt mô hình và giọng đọc
+
+Mở ⋮ › ⚙️ Cài đặt (giống phần "Configs" của Google AI Edge Gallery):
+
+- **Chạy trên**: Tự chọn (thử GPU rồi CPU), GPU, hoặc CPU. Đổi mục này thì mô hình được nạp lại ở câu hỏi sau.
+- **Temperature, Top-K, Top-P**: chỉnh độ "sáng tạo" của câu trả lời. Mặc định giống Gallery (1,0 / 64 / 0,95).
+- **Chế độ suy nghĩ**: mô hình (như Gemma 4) nghĩ trước rồi mới trả lời. Phần suy nghĩ hiện trong khung 💭 trên câu trả lời, bấm để mở xem.
+- **Giọng đọc**: bật / tắt tự đọc câu trả lời, tốc độ, cao độ, chọn giọng tiếng Việt có trong máy, nút nghe thử.
+
+Mô hình `.task` (MediaPipe) chưa dùng được temperature / top-k / top-p và chế độ suy nghĩ; cần mô hình `.litertlm`.
+
+## 🎧 Chép lời ghi âm (như Audio Scribe của Gallery)
+
+Mở ⋮ › 🎧 Chép lời ghi âm, chọn file (mp3, m4a, ogg, wav… cả phần tiếng của video) hoặc thu âm tới 30 phút, rồi chọn:
+
+- **Chép lời** hoặc **Dịch** sang Việt / Anh / Trung / Nhật / Hàn.
+- **AI nghe**: mô hình Gemma 3n / Gemma 4 (.litertlm) nghe trực tiếp, hiểu nhiều thứ tiếng.
+- **Nhận dạng tiếng Việt**: bộ nhận dạng offline (cài ở 🧠 Mô hình), nhanh hơn, chỉ nghe tiếng Việt; muốn dịch thì AI dịch phần chữ.
+
+App cắt bản ghi thành từng đoạn khoảng 25 giây (cắt ở chỗ im nhất để khỏi đứt chữ), bản chép hiện dần kèm mốc thời gian, có nút chép và chia sẻ. Mọi thứ chạy trong máy.
+
+## 📥 Tải mô hình trong app và 📏 đo tốc độ
+
+Vào ⋮ › 🧠 Mô hình › **📥 Tải mô hình AI và đo tốc độ**:
+
+- Danh sách mô hình lấy từ Google AI Edge Gallery: Gemma 4 E2B / E4B, Gemma 3n E2B / E4B, Gemma 3 1B, Qwen 2.5 1.5B và DeepSeek R1 1.5B. Mỗi mô hình ghi rõ dung lượng, RAM cần có, và có hiểu ảnh, âm thanh hay có chế độ suy nghĩ không. Mô hình nặng hơn RAM của máy thì có cảnh báo.
+- Bấm **Tải về** là app tải thẳng từ Hugging Face, đúng phiên bản Gallery đã thử. Việc tải chạy ở nền và có thông báo tiến độ. Mất mạng thì app tải tiếp từ chỗ đang dở. Tải xong, app tự thay mô hình đang dùng.
+- Mô hình đánh dấu 🔑 cần một bước chuẩn bị:
+  1. Đăng nhập huggingface.co và bấm đồng ý điều khoản ở trang của mô hình.
+  2. Tạo mã truy cập (Access Token) loại Read.
+  3. Dán mã vào app. Mã chỉ lưu trong máy.
+- **📏 Đo tốc độ**: mô hình đang dùng tóm tắt một đoạn văn cố định 3 lần. Kết quả cho biết tốc độ viết (token/giây), thời gian tới chữ đầu tiên, tốc độ đọc đề và thời gian nạp. Đổi GPU / CPU ở ⚙️ Cài đặt rồi đo lại để so sánh.
+
+## 📱 Điều khiển điện thoại bằng lời (như Mobile Actions của Gallery)
+
+Nói hoặc gõ vào chat, ví dụ:
+
+- "Bật đèn pin" hoặc "tắt đèn pin"
+- "Mở Wi‑Fi", "mở Bluetooth", "mở cài đặt vị trí"
+- "Mở Zalo", "mở máy tính"
+- "Hẹn giờ 5 phút", "tăng âm lượng", "tắt tiếng", "mở camera"
+- "Thêm lịch họp 9 giờ sáng mai", "lưu số 0912… tên anh Nam", "chỉ đường tới Hồ Gươm"
+
+Câu ngắn hay gặp được làm ngay mà không cần chờ AI. Cách này chạy được cả khi chưa có mô hình. Câu dài hơn thì AI hiểu ý rồi gọi cùng các lệnh đó.
+
+Android không cho app tự bật Wi‑Fi hay chỉnh độ sáng. Với những việc này, app mở đúng bảng cài đặt để bạn bấm một lần. Lịch và danh bạ được mở sẵn thông tin để bạn xem lại rồi tự bấm Lưu.
+
+## 🖼️ Tìm ảnh bằng chữ, offline
+
+Mở ⋮ › 🖼️ Tìm ảnh, cho phép đọc ảnh rồi bấm **Bắt đầu đọc ảnh**. AI (Gemma 3n / Gemma 4 .litertlm) xem từng ảnh một lần, mới nhất trước, và viết mô tả ngắn kèm từ khoá tiếng Việt và tiếng Anh. Mỗi ảnh mất vài giây. Bạn có thể dừng bất cứ lúc nào, lần sau app đọc tiếp.
+
+Đọc xong thì tìm bằng lời, ví dụ "con mèo", "sinh nhật", "bãi biển năm 2023", "hoá đơn tiền điện tháng 5". Gõ không dấu cũng tìm được. Bấm vào ảnh để mở, bấm ⓘ để xem mô tả AI đã viết.
+
+Bật **Tự đọc ảnh mới khi đang sạc** thì mỗi ngày, lúc máy đang sạc và bạn không dùng, app đọc thêm tối đa 200 ảnh. Mô tả chỉ lưu trong bộ nhớ riêng của app. Ảnh không gửi đi đâu.
+
+## 📸 Học ngoại ngữ qua camera
+
+Mở ⋮ › 📸 Học ngoại ngữ, chọn ngôn ngữ (Anh, Trung, Nhật, Hàn, Pháp) rồi chụp hay chọn ảnh đồ vật quanh bạn. AI xem ảnh và dạy tối đa 5 thứ nổi bật nhất trong đó. Mỗi thứ có:
+
+- từ bằng ngôn ngữ đang học
+- phiên âm (IPA, pinyin, romaji…)
+- nghĩa tiếng Việt
+- một câu ví dụ kèm lời dịch
+
+Bấm 🔊 để nghe đọc bằng giọng của ngôn ngữ đó. Bấm ☆ để lưu vào 📒 Sổ từ, rồi dùng 🃏 Ôn từ: app hiện nghĩa tiếng Việt, bạn gõ lại từ. Cần mô hình xem được ảnh (Gemma 3n / Gemma 4 .litertlm). Muốn nghe đọc thì máy cần có giọng đọc của ngôn ngữ đó.
+
 ## Bảo mật
 
 - **Khoá app:** mở app phải xác nhận vân tay, khuôn mặt hoặc mã PIN của máy. Rời app quá 1 phút thì khoá lại.

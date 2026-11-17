@@ -12,6 +12,7 @@ import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
+import com.google.ai.edge.litertlm.SamplerConfig
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -37,7 +38,7 @@ interface LlmEngine {
      * cuộc trò chuyện trong mô hình qua các lượt (giống Google AI Edge Gallery), chỉ gửi lời nhắn mới nên
      * chữ đầu tiên hiện ra nhanh hơn nhiều.
      */
-    suspend fun chat(turn: ChatTurn, onPartial: (String) -> Unit): String =
+    suspend fun chat(turn: ChatTurn, onPartial: (String) -> Unit, onThinking: (String) -> Unit = {}): String =
         generateStream(turn.toGemmaPrompt(), onPartial)
 
     /** Dừng câu trả lời đang sinh (nút ■). Phần chữ đã sinh vẫn được trả về. */
@@ -49,6 +50,21 @@ interface LlmEngine {
     /** Mô hình đang nạp có xem ảnh và nghe âm thanh được không. */
     val supportsMedia: Boolean get() = false
 }
+
+/**
+ * Cài đặt sinh chữ, như phần "Model config" của Google AI Edge Gallery. Đổi [backend] thì nạp lại mô hình;
+ * đổi các số khác thì bắt đầu cuộc trò chuyện mới. MediaPipe (.task) chưa dùng được temperature / top-k / top-p.
+ */
+data class GenSettings(
+    /** Càng cao càng sáng tạo, càng thấp càng chắc chắn. Gallery mặc định 1,0. */
+    val temperature: Float = 1.0f,
+    val topK: Int = 64,
+    val topP: Float = 0.95f,
+    /** Chế độ "suy nghĩ" của Gemma 4: mô hình nghĩ trước rồi mới trả lời (chậm hơn nhưng kỹ hơn). */
+    val thinking: Boolean = false,
+    /** "auto" (thử GPU rồi CPU), "gpu" hoặc "cpu". */
+    val backend: String = "auto",
+)
 
 /**
  * Số liệu một lượt sinh chữ, giống thanh số liệu của Google AI Edge Gallery.
@@ -142,6 +158,21 @@ enum class ModelFormat(val ext: String, val label: String) {
 class OfflineLlm(private val context: Context) : LlmEngine {
     // @Volatile vì nút dừng đọc nó từ luồng giao diện trong lúc luồng khác đang sinh chữ
     @Volatile private var runner: Runner? = null
+    /** Cài đặt hiện tại; đặt qua [applySettings]. */
+    @Volatile var settings: GenSettings = GenSettings()
+        private set
+
+    /** Đổi cài đặt. Đổi GPU / CPU thì bỏ mô hình đang nạp, câu sau sẽ nạp lại theo cài đặt mới. */
+    suspend fun applySettings(s: GenSettings) {
+        val reload = s.backend != settings.backend
+        settings = s
+        if (reload && runner != null) lock.withLock {
+            runner?.close()
+            runner = null
+            backend = ""
+        }
+    }
+
     // Một mô hình chỉ chạy một câu một lúc; chat, học ban đêm và phỏng vấn dùng chung nên phải xếp hàng
     private val lock = Mutex()
 
@@ -174,8 +205,8 @@ class OfflineLlm(private val context: Context) : LlmEngine {
         }
         val t0 = System.currentTimeMillis()
         val r = when (format) {
-            ModelFormat.TASK -> MediaPipeRunner(context, modelFile)
-            ModelFormat.LITERTLM -> LiteRtLmRunner(context, modelFile)
+            ModelFormat.TASK -> MediaPipeRunner(context, modelFile, settings.backend)
+            ModelFormat.LITERTLM -> LiteRtLmRunner(context, modelFile, settings.backend) { settings }
         }
         loadMs = System.currentTimeMillis() - t0
         backend = "${format.label} ${r.backend}"
@@ -195,17 +226,17 @@ class OfflineLlm(private val context: Context) : LlmEngine {
     }
 
     /** Lượt chat: với .litertlm thì dùng lại cuộc trò chuyện đang giữ trong mô hình (xem [LiteRtLmRunner.chat]). */
-    override suspend fun chat(turn: ChatTurn, onPartial: (String) -> Unit): String = lock.withLock {
+    override suspend fun chat(turn: ChatTurn, onPartial: (String) -> Unit, onThinking: (String) -> Unit): String = lock.withLock {
         withContext(Dispatchers.IO) {
             val r = ensureLoaded()
             // Đo từ lúc có khoá (không tính lúc xếp hàng chờ việc khác), đếm số lần thư viện báo chữ mới
             val t0 = System.currentTimeMillis()
             var first = 0L
             var chunks = 0
-            val out = r.chat(turn) { p ->
+            val out = r.chat(turn, { p ->
                 if (chunks++ == 0) first = System.currentTimeMillis() - t0
                 onPartial(p)
-            }
+            }, onThinking)
             val fresh = r.lastChatFresh
             lastStats = GenStats(
                 ttftMs = first,
@@ -226,6 +257,25 @@ class OfflineLlm(private val context: Context) : LlmEngine {
 
     /** Không chờ khoá: phải dừng được ngay cả khi luồng khác đang giữ khoá để sinh chữ. */
     override fun stop() { runner?.stop() }
+
+    /**
+     * Cho màn 🎧 Chép lời: nạp mô hình (nếu chưa) rồi cho biết mô hình có nghe được âm thanh không.
+     * Ném lỗi nếu chưa có mô hình hoặc nạp hỏng.
+     */
+    suspend fun canListen(): Boolean = lock.withLock {
+        withContext(Dispatchers.IO) { ensureLoaded() }
+        supportsMedia
+    }
+
+    /** Nghe một đoạn âm thanh WAV và làm theo [prompt] (chép lời, dịch…), không đụng tới cuộc chat. */
+    suspend fun listen(wav: ByteArray, prompt: String, onPartial: ((String) -> Unit)? = null): String = lock.withLock {
+        withContext(Dispatchers.IO) { ensureLoaded().media(emptyList(), listOf(wav), prompt, onPartial) }
+    }
+
+    /** Xem một ảnh JPEG và làm theo [prompt] (ví dụ mô tả ảnh để tìm kiếm), không đụng tới cuộc chat. */
+    suspend fun look(jpeg: ByteArray, prompt: String): String = lock.withLock {
+        withContext(Dispatchers.IO) { ensureLoaded().media(listOf(jpeg), emptyList(), prompt, null) }
+    }
 
     /** Nạp sẵn mô hình vào RAM khi mở app, để câu hỏi đầu tiên không phải đợi nạp vài chục giây. */
     suspend fun warmUp() {
@@ -293,16 +343,31 @@ class OfflineLlm(private val context: Context) : LlmEngine {
             throw e
         }
         onProgress(1f)
-        // Đợi câu đang trả lời (nếu có) xong rồi mới thay mô hình. Xoá cả hai loại file cũ để
-        // chỉ còn một mô hình (mỗi file vài GB) và không nhầm file nào đang dùng.
-        lock.withLock {
-            runner?.close()
-            runner = null
-            backend = ""
-            ModelFormat.entries.forEach { fileFor(it).delete() }
-            if (!tmp.renameTo(fileFor(newFormat))) { tmp.delete(); throw IOException("Không thay được file mô hình") }
-            withContext(Dispatchers.Default) { ensureLoaded() }
-        }
+        installModel(tmp, newFormat)
+    }
+
+    /** Chỗ để file đang tải về từ Hugging Face (tải tiếp được nếu bị ngắt), cùng thư mục với mô hình. */
+    fun downloadFile(): File {
+        val dir = dir ?: throw IOException("Không tìm thấy bộ nhớ của app")
+        dir.mkdirs()
+        return File(dir, "model.download.tmp")
+    }
+
+    /** Bộ nhớ trống ở chỗ lưu mô hình (byte). */
+    fun freeSpace(): Long = dir?.usableSpace ?: 0L
+
+    /**
+     * Thay mô hình đang dùng bằng file [tmp] (đã chép hoặc tải xong) rồi nạp luôn.
+     * Đợi câu đang trả lời (nếu có) xong rồi mới thay. Xoá cả hai loại file cũ để chỉ còn một mô hình
+     * (mỗi file vài GB) và không nhầm file nào đang dùng.
+     */
+    suspend fun installModel(tmp: File, newFormat: ModelFormat) = lock.withLock {
+        runner?.close()
+        runner = null
+        backend = ""
+        ModelFormat.entries.forEach { fileFor(it).delete() }
+        if (!tmp.renameTo(fileFor(newFormat))) { tmp.delete(); throw IOException("Không thay được file mô hình") }
+        withContext(Dispatchers.Default) { ensureLoaded() }
     }
 }
 
@@ -315,10 +380,17 @@ internal interface Runner : AutoCloseable {
     fun generate(prompt: String, onPartial: ((String) -> Unit)?): String
 
     /** Một lượt chat; mặc định không nhớ gì giữa các lượt, lịch sử nằm cả trong prompt, không nhận ảnh / âm thanh. */
-    fun chat(turn: ChatTurn, onPartial: (String) -> Unit): String {
+    fun chat(turn: ChatTurn, onPartial: (String) -> Unit, onThinking: (String) -> Unit = {}): String {
         require(!turn.hasMedia) { ChatTurn.NO_MEDIA }
         return generate(turn.toGemmaPrompt(), onPartial)
     }
+
+    /**
+     * Một câu riêng có kèm ảnh (JPEG) hoặc âm thanh (WAV), ví dụ chép lời hay mô tả ảnh. Không đụng tới cuộc chat.
+     * Chỉ mô hình nhận ảnh / âm thanh mới làm được.
+     */
+    fun media(images: List<ByteArray>, audios: List<ByteArray>, prompt: String, onPartial: ((String) -> Unit)?): String =
+        throw IllegalStateException(ChatTurn.NO_MEDIA)
 
     /** Dừng câu đang sinh, nếu thư viện cho phép. */
     fun stop() {}
@@ -334,16 +406,20 @@ internal interface Runner : AutoCloseable {
  * Thử GPU trước (Adreno của Snapdragon: nhanh hơn và mát máy hơn CPU).
  * Máy hay mô hình không chạy được GPU thì lùi về CPU thay vì báo lỗi.
  */
-private inline fun <T> gpuThenCpu(gpu: () -> T, cpu: () -> T): Pair<T, String> =
-    try {
+private inline fun <T> gpuThenCpu(pref: String, gpu: () -> T, cpu: () -> T): Pair<T, String> = when (pref) {
+    // Bạn chọn hẳn trong ⚙️ Cài đặt
+    "cpu" -> cpu() to "CPU"
+    "gpu" -> gpu() to "GPU"
+    else -> try {
         gpu() to "GPU"
     } catch (e: Throwable) {
         if (e is OutOfMemoryError) throw e
         cpu() to "CPU (GPU lỗi: ${e.message?.take(60)})"
     }
+}
 
 /** Mô hình .task chạy bằng MediaPipe LLM Inference. */
-internal class MediaPipeRunner(context: Context, file: File) : Runner {
+internal class MediaPipeRunner(context: Context, file: File, backendPref: String) : Runner {
     private val llm: LlmInference
     override val backend: String
 
@@ -353,7 +429,7 @@ internal class MediaPipeRunner(context: Context, file: File) : Runner {
             .setMaxTokens(4096) // tổng chữ vào + ra; đủ chỗ cho hồ sơ, quy tắc và trí nhớ
             .setPreferredBackend(b)
             .build()
-        val (engine, b) = gpuThenCpu(
+        val (engine, b) = gpuThenCpu(backendPref,
             { LlmInference.createFromOptions(context, build(LlmInference.Backend.GPU)) },
             { LlmInference.createFromOptions(context, build(LlmInference.Backend.CPU)) },
         )
@@ -384,7 +460,12 @@ internal class MediaPipeRunner(context: Context, file: File) : Runner {
  * <start_of_turn> mà prompt trong app đang viết sẵn cho Gemma 3, chỉ gửi phần lời của người dùng.
  * Chat thì giữ một Conversation qua các lượt (xem [chat]); các việc khác dùng Conversation riêng mỗi lần.
  */
-internal class LiteRtLmRunner(context: Context, file: File) : Runner {
+internal class LiteRtLmRunner(
+    context: Context,
+    file: File,
+    backendPref: String,
+    private val settings: () -> GenSettings,
+) : Runner {
     private val engine: Engine
     override val backend: String
 
@@ -417,7 +498,7 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
             }
             return load(b(), false) to false
         }
-        val (pair, b) = gpuThenCpu({ loadBest { Backend.GPU() } }, { loadBest { Backend.CPU() } })
+        val (pair, b) = gpuThenCpu(backendPref, { loadBest { Backend.GPU() } }, { loadBest { Backend.CPU() } })
         engine = pair.first
         media = pair.second
         prefs.edit().putBoolean(key, media).apply()
@@ -427,6 +508,8 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
     /** Cuộc trò chuyện chat đang giữ trong mô hình (bộ nhớ KV đã tính sẵn), cùng phần system đã dùng để tạo nó. */
     @Volatile private var chatConv: Conversation? = null
     private var chatSystem: String? = null
+    /** Cài đặt sinh chữ đã dùng khi tạo cuộc trò chuyện; đổi thì tạo cuộc mới. */
+    private var chatSettings: GenSettings? = null
     /** Ước lượng độ dài cuộc trò chuyện (ký tự) để làm mới trước khi tràn [MAX_TOKENS]. */
     private var chatChars = 0
     /** Cuộc trò chuyện đang sinh chữ, để nút dừng huỷ được. */
@@ -441,14 +524,26 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
         engine.createConversation().use { run(it, Contents.of(stripGemmaTurns(prompt)), onPartial) }
 
     /**
+     * Chép lời / dịch âm thanh (như Audio Scribe của Gallery) hay mô tả ảnh: cuộc trò chuyện riêng, ảnh / âm thanh trước
+     * rồi tới lời dặn. Chọn chữ chắc nhất ở mỗi bước (top-k 1) để kết quả sát thực tế, không "sáng tạo" thêm.
+     */
+    override fun media(images: List<ByteArray>, audios: List<ByteArray>, prompt: String, onPartial: ((String) -> Unit)?): String {
+        require(media) { ChatTurn.NO_MEDIA }
+        val config = ConversationConfig(samplerConfig = SamplerConfig(topK = 1, topP = 1.0, temperature = 1.0))
+        val parts = images.map { Content.ImageBytes(it) } + audios.map { Content.AudioBytes(it) } + Content.Text(prompt)
+        return engine.createConversation(config).use { run(it, Contents.of(parts), onPartial) }
+    }
+
+    /**
      * Cách Google AI Edge Gallery làm cho nhanh: giữ một Conversation sống qua các lượt. Mô hình đã "đọc" phần
      * system và các câu trước rồi, nên mỗi lượt chỉ phải đọc lời nhắn mới thay vì cả prompt dài, chữ đầu ra nhanh hơn.
      * Tạo cuộc trò chuyện mới (kèm vài câu gần đây làm lịch sử) khi: chưa có, phần system đổi (quy tắc, hồ sơ, tên…),
      * sắp đầy bộ nhớ ngữ cảnh, hoặc lượt trước bị dừng / lỗi.
      */
-    override fun chat(turn: ChatTurn, onPartial: (String) -> Unit): String {
+    override fun chat(turn: ChatTurn, onPartial: (String) -> Unit, onThinking: (String) -> Unit): String {
         require(!turn.hasMedia || media) { ChatTurn.NO_MEDIA }
-        val fresh = chatConv == null || chatSystem != turn.system ||
+        val gen = settings()
+        val fresh = chatConv == null || chatSystem != turn.system || chatSettings != gen ||
             turn.system.length + chatChars + turn.user.length + turn.mediaChars > CHAT_CHAR_BUDGET
         if (fresh) newChat(turn)
         lastChatFresh = fresh
@@ -458,7 +553,7 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
         )
         val used = turn.user.length + turn.mediaChars
         return try {
-            val out = run(chatConv!!, contents, onPartial)
+            val out = run(chatConv!!, contents, onPartial, onThinking, gen.thinking)
             chatChars += used + out.length
             // Bị dừng giữa chừng: mô hình còn giữ nửa câu trả lời, lượt sau làm lại cho sạch
             if (cancelled) dropChat()
@@ -469,19 +564,22 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
             // Thường do cuộc trò chuyện cũ đã đầy: làm lại một lần với cuộc trò chuyện mới
             newChat(turn)
             lastChatFresh = true
-            run(chatConv!!, contents, onPartial).also { chatChars += used + it.length }
+            run(chatConv!!, contents, onPartial, onThinking, gen.thinking).also { chatChars += used + it.length }
         }
     }
 
     private fun newChat(turn: ChatTurn) {
         dropChat()
+        val gen = settings()
         chatConv = engine.createConversation(
             ConversationConfig(
                 systemInstruction = Contents.of(turn.system),
                 initialMessages = historyMessages(turn.history),
+                samplerConfig = SamplerConfig(topK = gen.topK, topP = gen.topP.toDouble(), temperature = gen.temperature.toDouble()),
             )
         )
         chatSystem = turn.system
+        chatSettings = gen
         chatChars = turn.history.sumOf { it.second.length }
     }
 
@@ -489,6 +587,7 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
         chatConv?.let { runCatching { it.close() } }
         chatConv = null
         chatSystem = null
+        chatSettings = null
         chatChars = 0
     }
 
@@ -501,8 +600,15 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
     }
 
     /** Sinh chữ trên [conversation], báo dần qua [onPartial]. Bị dừng thì trả phần đã sinh, không báo lỗi. */
-    private fun run(conversation: Conversation, contents: Contents, onPartial: ((String) -> Unit)?): String {
+    private fun run(
+        conversation: Conversation,
+        contents: Contents,
+        onPartial: ((String) -> Unit)?,
+        onThinking: (String) -> Unit = {},
+        thinking: Boolean = false,
+    ): String {
         val sb = StringBuilder()
+        val thought = StringBuilder()
         val done = CountDownLatch(1)
         var error: Throwable? = null
         cancelled = false
@@ -510,6 +616,10 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
         try {
             conversation.sendMessageAsync(contents, object : MessageCallback {
                 override fun onMessage(message: Message) {
+                    // Gemma 4 ở chế độ suy nghĩ gửi phần nghĩ qua kênh "thought" (như Gallery), hiện riêng
+                    message.channels[THOUGHT_CHANNEL]?.takeIf { it.isNotEmpty() }?.let { t ->
+                        onThinking(synchronized(thought) { thought.append(t).toString() })
+                    }
                     // Mỗi lần nhận một khúc chữ mới
                     val chunk = message.toString()
                     if (chunk.isEmpty()) return
@@ -524,7 +634,7 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
                     if (throwable !is CancellationException) error = throwable
                     done.countDown()
                 }
-            })
+            }, if (thinking) mapOf<String, Any>("enable_thinking" to true) else emptyMap())
             done.await()
         } finally {
             active = null
@@ -540,6 +650,7 @@ internal class LiteRtLmRunner(context: Context, file: File) : Runner {
 
     companion object {
         const val MAX_TOKENS = 4096
+        const val THOUGHT_CHANNEL = "thought"
         /**
          * Khoảng 4096 token. Tiếng Việt thường 2,5–3 ký tự một token; để dư chỗ cho câu trả lời
          * nên làm mới cuộc trò chuyện khi tổng chữ vượt mức này.
