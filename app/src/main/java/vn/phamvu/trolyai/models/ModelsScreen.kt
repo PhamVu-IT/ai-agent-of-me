@@ -26,7 +26,7 @@ class ModelPickers(
 
 /** Một chỗ xem và chọn các mô hình: AI (.task hoặc .litertlm), nhận giọng chủ máy, nghe tiếng Việt, nghe tiếng Anh. */
 @Composable
-fun ModelsScreen(vm: ChatViewModel, pickers: ModelPickers, onBack: () -> Unit) {
+fun ModelsScreen(vm: ChatViewModel, pickers: ModelPickers, onStore: () -> Unit, onBack: () -> Unit) {
     val busy = vm.importProgress.value != null || vm.speakerBusy.value || vm.asrBusy.value ||
         vm.viAsrBusy.value
     val view = LocalView.current
@@ -37,7 +37,9 @@ fun ModelsScreen(vm: ChatViewModel, pickers: ModelPickers, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().systemBarsPadding().padding(16.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("🧠 Mô hình trong máy", style = MaterialTheme.typography.titleLarge)
-        Text("Tải file về điện thoại (thường vào thư mục Download) rồi chọn ở đây. App chép file vào bộ nhớ " +
+        // Như Gallery: chọn mô hình trong danh sách rồi tải thẳng, không phải tự tìm file
+        Button(onClick = onStore, modifier = Modifier.fillMaxWidth()) { Text("📥 Tải mô hình AI và đo tốc độ") }
+        Text("Hoặc tải file về điện thoại (thường vào thư mục Download) rồi chọn ở đây. App chép file vào bộ nhớ " +
             "riêng của nó, chép xong có thể xoá bản trong Download.", style = MaterialTheme.typography.bodySmall)
 
         Text((if (vm.modelReady.value) "✅" else "❌") + " Mô hình AI trò chuyện (.task hoặc .litertlm)",

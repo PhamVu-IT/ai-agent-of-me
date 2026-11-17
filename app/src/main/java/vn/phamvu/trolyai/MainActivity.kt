@@ -41,6 +41,16 @@ import vn.phamvu.trolyai.security.BiometricAuthenticator
 import vn.phamvu.trolyai.security.VoiceThenBiometric
 import vn.phamvu.trolyai.ui.AppTheme
 import vn.phamvu.trolyai.ui.ChatScreen
+import vn.phamvu.trolyai.models.ModelStoreScreen
+import vn.phamvu.trolyai.models.ModelStoreViewModel
+import vn.phamvu.trolyai.photos.PhotoSearchScreen
+import vn.phamvu.trolyai.photos.PhotoSearchViewModel
+import vn.phamvu.trolyai.scribe.ScribeScreen
+import vn.phamvu.trolyai.teacher.LanguageTeacherScreen
+import vn.phamvu.trolyai.teacher.LanguageTeacherViewModel
+import vn.phamvu.trolyai.scribe.ScribeViewModel
+import vn.phamvu.trolyai.ui.SettingsScreen
+import vn.phamvu.trolyai.ui.SkillsScreen
 import vn.phamvu.trolyai.ui.StatsScreen
 import vn.phamvu.trolyai.voice.VietnameseSpeech
 import vn.phamvu.trolyai.voice.VoiceId
@@ -48,7 +58,48 @@ import java.util.Locale
 
 class MainActivity : FragmentActivity() {
     private val vm: ChatViewModel by viewModels()
+    /** Chỉ tạo khi mở màn 🎧 Chép lời. */
+    private val scribe: ScribeViewModel by viewModels()
+    /** Chỉ tạo khi mở màn 📥 Tải mô hình. */
+    private val store: ModelStoreViewModel by viewModels()
+    /** Chỉ tạo khi mở màn 🖼️ Tìm ảnh. */
+    private val photos: PhotoSearchViewModel by viewModels()
+    /** Chỉ tạo khi mở màn 📸 Học ngoại ngữ. */
+    private val teacher: LanguageTeacherViewModel by viewModels()
+    private val pickTeacherPhoto = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        pickingFile = false
+        uri?.let(teacher::load)
+    }
+    private val askPhotoPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        photos.onPermission(ok)
+    }
     private var tts: TextToSpeech? = null
+    /** Tên các giọng tiếng Việt có trong máy, cho màn ⚙️ Cài đặt. */
+    private val ttsVoices = mutableStateOf<List<String>>(emptyList())
+
+    /** Đọc to theo cài đặt giọng đọc (tốc độ, cao độ, giọng đã chọn). */
+    private fun speak(text: String) {
+        val t = tts ?: return
+        val s = vm.speechSettings.value
+        t.setSpeechRate(s.rate)
+        t.setPitch(s.pitch)
+        val voice = s.voice.takeIf { it.isNotEmpty() }
+            ?.let { name -> runCatching { t.voices?.firstOrNull { it.name == name } }.getOrNull() }
+        if (voice != null) t.voice = voice else t.language = Locale("vi", "VN")
+        t.speak(text, TextToSpeech.QUEUE_FLUSH, null, "r")
+    }
+
+    /** Đọc bằng giọng một ngôn ngữ khác (màn học ngoại ngữ); câu sau [speak] tự quay về giọng tiếng Việt. */
+    private fun speakIn(text: String, locale: Locale) {
+        val t = tts ?: return
+        t.setSpeechRate(0.9f) // chậm một chút cho dễ nghe khi học
+        t.setPitch(1f)
+        if (t.setLanguage(locale) < TextToSpeech.LANG_AVAILABLE) {
+            teacher.error.value = "Máy chưa có giọng đọc ${locale.displayLanguage}. Cài thêm trong Cài đặt Android › Chuyển văn bản thành giọng nói."
+            return
+        }
+        t.speak(text, TextToSpeech.QUEUE_FLUSH, null, "lang")
+    }
     private lateinit var auth: BiometricAuthenticator
     private lateinit var voice: VoiceId
 
@@ -57,7 +108,7 @@ class MainActivity : FragmentActivity() {
     private var backgroundSince = 0L
     private var authenticating = false // màn hình nhập PIN làm app tạm ẩn, tránh hỏi lại hai lần
 
-    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh" hoặc "thongke"
+    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh", "thongke", "skill", "caidat", "cheploi", "taimohinh", "timanh" hoặc "ngoaingu"
     private val voicePrompt = mutableStateOf<String?>(null) // dòng chữ khi đang nghe để nhận giọng
 
     // Nghe tiếng Việt ngay trong app (ưu tiên mô hình offline), không mở hộp thoại "Voice search" của Google
@@ -104,10 +155,20 @@ class MainActivity : FragmentActivity() {
         if (uris.isNotEmpty()) vm.attachImages(uris)
     }
     private var photoUri: Uri? = null
+    // Chọn thư mục skill (có SKILL.md) trong máy, như "Import local skill" của Gallery
+    private val pickSkillFolder = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { tree ->
+        pickingFile = false
+        tree?.let(vm::importSkillFolder)
+    }
+    private val pickAudio = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        pickingFile = false
+        uri?.let(scribe::open)
+    }
     private val takePhoto = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         pickingFile = false
         val uri = photoUri
-        if (ok && uri != null) vm.attachImages(listOf(uri))
+        // Ảnh chụp từ màn 📸 Học ngoại ngữ thì đưa cho màn đó, còn lại đính kèm vào chat
+        if (ok && uri != null) { if (screen.value == "ngoaingu") teacher.load(uri) else vm.attachImages(listOf(uri)) }
     }
 
     /** Ảnh chụp lưu tạm trong bộ nhớ đệm riêng của app, đưa cho app máy ảnh qua FileProvider. */
@@ -120,7 +181,8 @@ class MainActivity : FragmentActivity() {
         pickingFile = true
         try { takePhoto.launch(uri) } catch (e: Exception) {
             pickingFile = false
-            vm.mediaNote.value = "Máy không có app chụp ảnh."
+            if (screen.value == "ngoaingu") teacher.error.value = "Máy không có app chụp ảnh."
+            else vm.mediaNote.value = "Máy không có app chụp ảnh."
         }
     }
 
@@ -148,7 +210,14 @@ class MainActivity : FragmentActivity() {
         if (Build.VERSION.SDK_INT >= 33) perms += Manifest.permission.POST_NOTIFICATIONS
         askPermissions.launch(perms.toTypedArray())
 
-        tts = TextToSpeech(this) { tts?.language = Locale("vi", "VN") }
+        tts = TextToSpeech(this) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale("vi", "VN")
+                ttsVoices.value = runCatching {
+                    tts?.voices.orEmpty().filter { it.locale.language == "vi" }.map { it.name }.sorted()
+                }.getOrDefault(emptyList())
+            }
+        }
         auth = BiometricAuthenticator(this)
         voice = VoiceId(this, (application as App).db)
         speech = VietnameseSpeech(this, lifecycleScope)
@@ -161,11 +230,37 @@ class MainActivity : FragmentActivity() {
                         !unlocked.value -> LockedScreen(noLockSet = !auth.isAvailable(), onUnlock = ::unlock)
                         screen.value == "giong" -> VoiceEnrollScreen(voice, vm, pickers, onDone = { screen.value = "chat" })
                         screen.value == "phongvan" -> InterviewScreen(vm, pickers, onBack = { screen.value = "chat" })
-                        screen.value == "mohinh" -> ModelsScreen(vm, pickers, onBack = { screen.value = "chat" })
+                        screen.value == "mohinh" -> ModelsScreen(vm, pickers, onStore = { screen.value = "taimohinh" },
+                            onBack = { screen.value = "chat" })
+                        screen.value == "taimohinh" -> ModelStoreScreen(store.also { it.onInstalled = vm::refreshModel },
+                            onBack = { screen.value = "mohinh" })
                         screen.value == "thongke" -> StatsScreen(vm, onBack = { screen.value = "chat" })
+                        screen.value == "skill" -> SkillsScreen(vm,
+                            onImportFolder = { pickingFile = true; pickSkillFolder.launch(null) },
+                            onBack = { screen.value = "chat" })
+                        screen.value == "caidat" -> SettingsScreen(vm, ttsVoices.value,
+                            onTestVoice = { speak("Xin chào, mình là trợ lý của bạn. Giọng đọc này nghe ổn không?") },
+                            onBack = { screen.value = "chat" })
+                        screen.value == "ngoaingu" -> LanguageTeacherScreen(teacher,
+                            onTakePhoto = ::launchCamera,
+                            onPickPhoto = {
+                                pickingFile = true
+                                pickTeacherPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            },
+                            onSpeak = ::speakIn,
+                            onBack = { screen.value = "chat" })
+                        screen.value == "timanh" -> PhotoSearchScreen(photos,
+                            onAskPermission = {
+                                askPhotoPermission.launch(if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES
+                                    else Manifest.permission.READ_EXTERNAL_STORAGE)
+                            },
+                            onBack = { screen.value = "chat" })
+                        screen.value == "cheploi" -> ScribeScreen(scribe,
+                            onPickFile = { pickingFile = true; pickAudio.launch(arrayOf("audio/*", "video/*")) },
+                            onBack = { screen.value = "chat" })
                         else -> ChatScreen(vm,
                             onMic = { listen(manual = true) },
-                            onSpeak = { tts?.speak(it, TextToSpeech.QUEUE_FLUSH, null, "r") },
+                            onSpeak = ::speak,
                             // Phải xác nhận vân tay trước, để người khác không đăng ký giọng của họ thay bạn
                             onVoiceSetup = { lifecycleScope.launch { if (auth.confirm("Đăng ký giọng chủ máy")) screen.value = "giong" } },
                             onBankSetup = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
@@ -173,6 +268,11 @@ class MainActivity : FragmentActivity() {
                             onPickModel = pickers.model,
                             onModels = { screen.value = "mohinh" },
                             onStats = { screen.value = "thongke" },
+                            onSkills = { screen.value = "skill" },
+                            onSettings = { screen.value = "caidat" },
+                            onScribe = { screen.value = "cheploi" },
+                            onPhotos = { screen.value = "timanh" },
+                            onTeacher = { screen.value = "ngoaingu" },
                             onPickImage = {
                                 pickingFile = true
                                 pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))

@@ -57,11 +57,15 @@ object ChatMedia {
         ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }.toByteArray()
 
     /**
-     * Thu âm cho tới khi [shouldStop] trả true hoặc đủ [MAX_AUDIO_SEC] giây. [onProgress] nhận số mili giây đã thu
+     * Thu âm cho tới khi [shouldStop] trả true hoặc đủ [maxSec] giây (mặc định [MAX_AUDIO_SEC]). [onProgress] nhận số mili giây đã thu
      * và độ to 0..1 để vẽ thanh âm lượng. Trả về dữ liệu PCM 16-bit.
      */
     @SuppressLint("MissingPermission") // màn hình đã xin quyền micro khi mở app
-    suspend fun record(shouldStop: () -> Boolean, onProgress: (Long, Float) -> Unit): ByteArray = withContext(Dispatchers.IO) {
+    suspend fun record(
+        shouldStop: () -> Boolean,
+        onProgress: (Long, Float) -> Unit,
+        maxSec: Int = MAX_AUDIO_SEC,
+    ): ByteArray = withContext(Dispatchers.IO) {
         val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val rec = AudioRecord(MediaRecorder.AudioSource.MIC, SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT, max(minBuf, SAMPLE_RATE / 5 * 2))
@@ -71,7 +75,7 @@ object ChatMedia {
         }
         val out = ByteArrayOutputStream()
         val buf = ShortArray(SAMPLE_RATE / 10) // 0,1 giây
-        val maxBytes = SAMPLE_RATE * 2 * MAX_AUDIO_SEC
+        val maxBytes = SAMPLE_RATE * 2 * maxSec
         try {
             rec.startRecording()
             while (!shouldStop() && out.size() < maxBytes) {
