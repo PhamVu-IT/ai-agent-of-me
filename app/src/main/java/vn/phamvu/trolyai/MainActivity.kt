@@ -31,6 +31,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import vn.phamvu.trolyai.data.InterviewProfile
+import vn.phamvu.trolyai.dates.DatesScreen
 import vn.phamvu.trolyai.interview.InterviewCoach
 import vn.phamvu.trolyai.interview.InterviewService
 import vn.phamvu.trolyai.models.AsrModelSection
@@ -108,7 +109,7 @@ class MainActivity : FragmentActivity() {
     private var backgroundSince = 0L
     private var authenticating = false // màn hình nhập PIN làm app tạm ẩn, tránh hỏi lại hai lần
 
-    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh", "thongke", "skill", "caidat", "cheploi", "taimohinh", "timanh" hoặc "ngoaingu"
+    private val screen = mutableStateOf("chat")          // "chat", "giong", "phongvan", "mohinh", "thongke", "skill", "caidat", "cheploi", "taimohinh", "timanh", "ngoaingu" hoặc "ngay"
     private val voicePrompt = mutableStateOf<String?>(null) // dòng chữ khi đang nghe để nhận giọng
 
     // Nghe tiếng Việt ngay trong app (ưu tiên mô hình offline), không mở hộp thoại "Voice search" của Google
@@ -258,6 +259,7 @@ class MainActivity : FragmentActivity() {
                         screen.value == "cheploi" -> ScribeScreen(scribe,
                             onPickFile = { pickingFile = true; pickAudio.launch(arrayOf("audio/*", "video/*")) },
                             onBack = { screen.value = "chat" })
+                        screen.value == "ngay" -> DatesScreen(onBack = { screen.value = "chat" })
                         else -> ChatScreen(vm,
                             onMic = { listen(manual = true) },
                             onSpeak = ::speak,
@@ -277,7 +279,8 @@ class MainActivity : FragmentActivity() {
                                 pickingFile = true
                                 pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                             },
-                            onTakePhoto = ::launchCamera)
+                            onTakePhoto = ::launchCamera,
+                            onDates = { screen.value = "ngay" })
                     }
                     micPrompt.value?.let { msg ->
                         Dialog(onDismissRequest = ::stopListening) {
@@ -316,6 +319,7 @@ class MainActivity : FragmentActivity() {
         if (backgroundSince > 0 && System.currentTimeMillis() - backgroundSince > 60_000) unlocked.value = false
         vm.refreshModel() // có thể vừa adb push mô hình vào máy
         vm.refreshSideModels()
+        vm.checkDates() // gần ngày giỗ, sinh nhật, kỷ niệm thì trợ lý tự nhắc trước
         if (!unlocked.value) unlock() else listenIfAsked()
     }
 

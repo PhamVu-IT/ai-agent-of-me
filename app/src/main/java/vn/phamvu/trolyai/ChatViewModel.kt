@@ -16,6 +16,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import vn.phamvu.trolyai.agent.ActionExecutor
 import vn.phamvu.trolyai.agent.AgentTools
 import vn.phamvu.trolyai.agent.Assistant
@@ -24,6 +26,7 @@ import vn.phamvu.trolyai.mcp.McpServer
 import vn.phamvu.trolyai.skills.Skill
 import vn.phamvu.trolyai.agent.Tier
 import vn.phamvu.trolyai.data.ChatMessage
+import vn.phamvu.trolyai.dates.Dates
 import vn.phamvu.trolyai.interview.EnglishAsr
 import vn.phamvu.trolyai.voice.VietnameseAsr
 import vn.phamvu.trolyai.voice.VoiceId
@@ -101,6 +104,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** Báo lỗi ngắn khi chọn ảnh hay thu âm hỏng. */
     val mediaNote = mutableStateOf("")
 
+    /** Việc nạp tin nhắn cũ lúc mở app; lời nhắc ngày quan trọng đợi việc này xong mới thêm vào. */
+    private var loadJob: Job? = null
+    private val datesLock = Mutex()
     /** Tăng mỗi lượt; lượt đã bị dừng thì không được ghi đè trạng thái của lượt mới. */
     @Volatile private var turnId = 0
 
@@ -239,7 +245,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             if (!thinking.value) status.value = ""
         }
         viewModelScope.launch { assistantName.value = Profile(db).assistantName() }
-        viewModelScope.launch {
+        loadJob = viewModelScope.launch {
             messages.addAll(db.chats().recent(50).reversed())
             // Lần đầu: trợ lý chủ động hỏi để làm quen
             if (messages.isEmpty()) add(ChatMessage(fromUser = false, text =
@@ -248,6 +254,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 "(mình - bạn, em - anh, tớ - cậu…), và bạn muốn đặt tên cho mình là gì? " +
                 "Sau đó kể mình nghe các khoản chi cố định hằng tháng (tiền nhà, trả lãi, gửi gia đình, tiết kiệm…) " +
                 "để mình nhắc bạn đúng hạn."))
+        }
+        checkDates()
+    }
+
+    /**
+     * Mở app gần ngày giỗ, sinh nhật, kỷ niệm thì trợ lý tự nói trước, không đợi bạn hỏi. Mỗi ngày một lần.
+     * Gọi khi mở app và mỗi lần app quay lại màn hình.
+     */
+    fun checkDates() {
+        viewModelScope.launch {
+            loadJob?.join()
+            datesLock.withLock {
+                val you = Profile(db).xungHo().split("-").getOrNull(1)?.trim() ?: "bạn"
+                runCatching { Dates(db).openingNote(you) }.getOrNull()?.let { add(ChatMessage(fromUser = false, text = it)) }
+            }
         }
     }
 

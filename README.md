@@ -140,6 +140,24 @@ Mỗi lần mở, sau khi mở khoá, trợ lý **tự nghe ngay**, không cần
 - Thông báo ngân hàng: app chỉ đọc thông báo đang hiện trên máy, **không đăng nhập ngân hàng**. Thông báo nào không phải giao dịch tiền ra thì bỏ qua ngay, không lưu. Giao dịch tiền ra được đoán theo từ khoá trong nội dung chuyển khoản (ví dụ "tien nha") hoặc số tiền lệch dưới 5%, rồi hỏi bạn "Có phải khoản Tiền nhà không?" với nút Đúng / Không phải.
 - Khi bạn hỏi về tiền, trợ lý chỉ trả lời dựa trên sổ này, không đoán.
 
+## Tự nhắc ngày giỗ, sinh nhật, kỷ niệm
+
+Trợ lý nhớ các ngày lặp lại hằng năm và **tự nhắc, không cần bạn hỏi lại**:
+
+- **Ghi lại khi bạn kể**: nói hay gõ "giỗ ông nội mùng 10 tháng 3 âm", "sinh nhật vợ 20/10", "kỷ niệm ngày cưới 15/8/2015",
+  "bố tôi mất ngày 3/5 âm"… là trợ lý lưu ngay vào sổ 📅 Ngày quan trọng (tìm bằng luật trên máy, không cần mô hình AI;
+  AI cũng có hành động `add_event` cho câu nói khó hơn). Giỗ mặc định tính theo âm lịch.
+- **Tìm lại lời kể cũ**: lần đầu mở bản mới, trợ lý đọc lại trí nhớ và tin nhắn cũ để tìm các ngày bạn đã kể từ trước.
+- **Âm lịch offline**: đổi âm ⇄ dương theo thuật toán thiên văn của Hồ Ngọc Đức (giờ Hà Nội), có tháng nhuận.
+  Tháng thiếu không có ngày 30 thì giỗ tính vào ngày 29.
+- **Bản tin buổi sáng** (mặc định 7 giờ, đổi trong màn 📅): một thông báo gồm ngày âm hôm nay, mùng 1 / rằm,
+  giỗ / sinh nhật / kỷ niệm sắp tới, khoản chi sắp đến hạn và lời nhắc trong ngày. Ngày quan trọng được nhắc
+  trước 7 ngày (giỗ) hoặc 3 ngày (loại khác), trước 3 ngày, hôm trước và đúng ngày. Không có gì thì không làm phiền.
+  Máy tắt lúc 7 giờ thì bật lên trước trưa vẫn nhận bù; khởi động lại máy hay cập nhật app không làm mất lịch.
+- **Mở chat là nhắc**: trong khoảng cần nhắc, mở app là trợ lý tự nói trước (mỗi ngày một lần).
+- **Màn 📅 Ngày quan trọng** (menu ⋮): xem theo ngày gần nhất, thêm, sửa, xoá. Ngày đã xoá thì trợ lý không tự thêm lại.
+- Hỏi "sắp tới có giỗ ai không", "hôm nay âm lịch ngày mấy" là trả lời ngay từ dữ liệu trên máy.
+
 ## Chế độ ẩn hỗ trợ phỏng vấn tiếng Anh
 
 Bấm **🎧 Phỏng vấn** trên màn hình chat.

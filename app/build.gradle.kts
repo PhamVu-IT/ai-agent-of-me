@@ -59,6 +59,9 @@ dependencies {
     implementation("net.zetetic:sqlcipher-android:4.6.1")
     implementation("androidx.sqlite:sqlite-ktx:2.4.0")
 
+    // Kiểm thử phần đổi âm lịch và tìm ngày giỗ (chạy trên máy tính: ./gradlew testDebugUnitTest)
+    testImplementation("junit:junit:4.13.2")
+
     // Giải nén mô hình nghe tiếng Anh (.tar.bz2 tải từ sherpa-onnx) ngay trong app
     implementation("org.apache.commons:commons-compress:1.27.1")
 
